@@ -48,10 +48,11 @@ def load_visual_relations(matlab_path: Union[str, Path]) -> Iterator[HicoDetSamp
         })
 
     # Load samples
-    samples = []
+    img_count = 0
     vr_count = 0
     skipped_images = 0
     for img in matlab_dict['bbox_train'].squeeze(0):
+        img_count += 1
         filename = img['filename'].item()
         size = (
             img['size']['depth'].item().item(),
@@ -113,7 +114,7 @@ def load_visual_relations(matlab_path: Union[str, Path]) -> Iterator[HicoDetSamp
                 )
             )
 
-    logger.info(f'Loaded {vr_count:,} visual relations from {len(samples):,} images')
+    logger.info(f'Loaded {vr_count:,} visual relations from {img_count:,} images')
     logger.warning(f'Skipped {skipped_images} images without any visible relation')
 
 
