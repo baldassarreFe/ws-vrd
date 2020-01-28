@@ -30,11 +30,11 @@ rm /tmp/d2.sh
 Preprocess for training with:
 ```bash
 python -m xib.preprocessing.hico_det \
-  --images-path=data/hico_20160224_det/images/train2015 \
-  --matlab-path=data/hico_20160224_det/anno_bbox.mat \
+  --images-path=/local_storage/datasets/hico_20160224_det/images/train2015/ \
+  --matlab-path=/local_storage/datasets/hico_20160224_det/anno_bbox.mat \
   --threshold=.3 \
-  --detectron-home=~/detectron2 \ 
-  --output-path ~/xib_tmp
+  --detectron-home=~/detectron2 \
+  --output-path /local_storage/users/fbaldassarre/hico_20160224_det
 ```
 
 ## Visual Relationship Detection
