@@ -16,9 +16,10 @@ from ignite.contrib.handlers import TensorboardLogger, ProgressBar
 from ignite.metrics import Average
 
 from omegaconf import OmegaConf
+from torch_geometric.data import Batch
 
 from .utils import import_, random_name
-from .logging import loguru, add_logfile, TensorboardLogHandler
+from .logging import logger, add_logfile, TensorboardLogHandler
 from .ignite.engine import Trainer, Validator
 from .ignite.metrics import OutputMetricBatch, AveragePrecisionEpoch, AveragePrecisionBatch
 
@@ -45,7 +46,7 @@ def setup_logging(conf: OmegaConf) -> TensorboardLogger:
     return tb_logger
 
 
-def training_step(trainer: Trainer, graphs):
+def training_step(trainer: Trainer, graphs: Batch):
     graphs = graphs.to(trainer.conf.session.device)
     output = trainer.model(graphs)
 
@@ -62,7 +63,7 @@ def training_step(trainer: Trainer, graphs):
     }
 
 
-def validation_step(validator: Validator, graphs):
+def validation_step(validator: Validator, graphs: Batch):
     graphs = graphs.to(validator.conf.session.device)
     output = validator.model(graphs)
 
@@ -105,9 +106,9 @@ def build_dataloaders(conf):
     else:
         raise ValueError(f'Invalid data specification:\n{conf.dataset.pretty()}')
 
-    loguru.logger.info(f'Train/Val split: {len(train_dataset)} / {len(val_dataset)} '
-                       f'{len(train_dataset) / (len(train_dataset) + len(val_dataset)):.1%}/'
-                       f'{len(val_dataset) / (len(train_dataset) + len(val_dataset)):.1%}')
+    logger.info(f'Train/Val split: {len(train_dataset)}/{len(val_dataset)} '
+                f'{len(train_dataset) / (len(train_dataset) + len(val_dataset)):.1%}/'
+                f'{len(val_dataset) / (len(train_dataset) + len(val_dataset)):.1%}')
 
     train_dataloader = torch_geometric.data.DataLoader(
         train_dataset,
@@ -152,7 +153,7 @@ def build_model(conf: OmegaConf) -> torch.nn.Module:
     return model
 
 
-@loguru.logger.catch
+@logger.catch
 def main():
     # region Setup
     conf = parse_args()
@@ -166,7 +167,7 @@ def main():
 
     if 'resume' in conf:
         checkpoint = Path(conf.resume.checkpoint).expanduser().resolve()
-        loguru.logger.info(f'Resuming checkpoint from {checkpoint}')
+        logger.info(f'Resuming checkpoint from {checkpoint}')
         Checkpoint.load_objects({
             'model': trainer.model,
             'optimizer': trainer.optimizer,
@@ -218,7 +219,7 @@ def main():
 
     # Log configuration before starting
     yaml = pyaml.dump(OmegaConf.to_container(trainer.conf), safe=True, sort_dicts=False, force_embed=True)
-    loguru.logger.info('\n' + yaml)
+    logger.info('\n' + yaml)
     tb_logger.writer.add_text('Configuration', textwrap.indent(yaml, '    '), trainer.global_step() or 0)
     with open(Path(trainer.conf.checkpoint.folder).expanduser() / trainer.conf.fullname / 'conf', mode='w') as f:
         f.write(yaml)

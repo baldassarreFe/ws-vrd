@@ -1,9 +1,10 @@
 import time
 import dataclasses
 from pathlib import Path
-from typing import Union, Iterable, List, Tuple, Dict, Optional, Callable
+from typing import Union, Iterable, Tuple, Dict, Optional, Callable
 
 import torch
+import torch.utils.data
 from torch_geometric.data import Data
 
 from loguru import logger
@@ -39,7 +40,7 @@ class HicoDet(torch.utils.data.Dataset):
 
     def __init__(self, folder: Union[str, Path], transforms: Optional[Callable] = None):
         folder = Path(folder).expanduser().resolve()
-        self.paths = [p for p in folder.iterdir() if p.suffix == '.pth']
+        self.paths = sorted(p for p in folder.iterdir() if p.suffix == '.pth')
         self.samples = None
         self.transforms = transforms
 
@@ -66,6 +67,11 @@ class HicoDet(torch.utils.data.Dataset):
         if self.transforms is not None:
             graph = self.transforms(graph)
 
+        if graph.num_nodes == 0:
+            # If a graph has 0 nodes and it's put last in the the batch formed by
+            # Batch.from_data_list(...) it will cause a miscount in batch.num_graphs
+            logger.warning(f'Loaded graph without nodes for: {sample.filename}')
+
         return graph
 
     def load_eager(self):
@@ -73,7 +79,6 @@ class HicoDet(torch.utils.data.Dataset):
         self.samples = [torch.load(p) for p in self.paths]
         logger.info(f'Loaded {sum(len(s.gt_visual_relations) for s in self.samples):,} visual relations from '
                     f'{len(self.samples):,} images in {time.perf_counter() - start_time:.1f}s')
-
 
     @staticmethod
     def _visual_relations_to_binary_targets(visual_relations: VisualRelations) -> torch.Tensor:

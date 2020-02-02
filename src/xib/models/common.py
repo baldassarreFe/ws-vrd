@@ -252,7 +252,12 @@ class OutputGlobalModel(nn.Module):
             node_to_graph_idx: torch.LongTensor,
             num_graphs: int
     ) -> torch.Tensor:
+        # If a graph has no edges, i.e. len(edge_to_graph_idx.unique) != 64:
+        # - if it also has 0 nodes it can cause a bug (see dataloader)
+        # - if it has only 1 node, scatter max will fill its global vector with zeros
+        #   and the fully connected layer simply apply the bias term
         edge_to_graph_idx = node_to_graph_idx[edge_indices[0]]
         out = scatter_('max', edges, index=edge_to_graph_idx, dim=0, dim_size=num_graphs)
+
         out = self.fcs(out)
         return out
