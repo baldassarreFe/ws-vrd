@@ -10,6 +10,7 @@ from detectron2.engine import DefaultPredictor
 
 from ..structures import Instances
 
+
 class FeatureExtractor(DefaultPredictor):
     CFG_PATH = 'configs/COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x.yaml'
     WEIGHTS_URL = 'detectron2://COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x/139173657/model_final_68b088.pkl'

@@ -1,5 +1,5 @@
-from .utils import DefaultPredictor
+from .utils import FeatureExtractor
 
 __all__ = [
-    'DefaultPredictor'
+    'FeatureExtractor'
 ]

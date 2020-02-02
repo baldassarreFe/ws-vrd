@@ -10,12 +10,12 @@ dataset:
   split: .75
   eager: yes
   trainval:
-    folder: data/hico_20160224_det
+    folder: data/hico_20160224_det/train
 
 input: {}
 
 dataloader:
-  batch_size: 32
+  batch_size: 64
   num_workers: 1
 
 optimizer:
