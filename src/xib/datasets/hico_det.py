@@ -41,6 +41,8 @@ class HicoDet(torch.utils.data.Dataset):
     def __init__(self, folder: Union[str, Path], transforms: Optional[Callable] = None):
         folder = Path(folder).expanduser().resolve()
         self.paths = sorted(p for p in folder.iterdir() if p.suffix == '.pth')
+        if len(self.paths) == 0:
+            logger.warning(f'Empty dataloader: no .pth file found in {folder}')
         self.samples = None
         self.transforms = transforms
 
@@ -76,6 +78,7 @@ class HicoDet(torch.utils.data.Dataset):
 
     def load_eager(self):
         start_time = time.perf_counter()
+        logger.debug(f'Starting to load {len(self.paths)} .pth files')
         self.samples = [torch.load(p) for p in self.paths]
         logger.info(f'Loaded {sum(len(s.gt_visual_relations) for s in self.samples):,} visual relations from '
                     f'{len(self.samples):,} images in {time.perf_counter() - start_time:.1f}s')
