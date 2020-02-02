@@ -195,7 +195,7 @@ def main():
                 'scheduler': trainer.scheduler,
                 'trainer': trainer,
             },
-            DiskSaver(Path(conf.checkpoint.folder) / conf.fullname),
+            DiskSaver(Path(conf.checkpoint.folder).expanduser().resolve() / conf.fullname),
             n_saved=None,
             global_step_transform=trainer.global_step
         )
