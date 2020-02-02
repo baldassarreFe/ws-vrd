@@ -1,10 +1,54 @@
 import signal
-from functools import wraps
-from typing import Callable
+import random
+import inspect
+import importlib
 
-import numpy as np
+from functools import wraps
+from typing import Callable, Mapping, Sequence, Generator, Tuple, Any
+
 import torch
+import numpy as np
+import namesgenerator
+
 from loguru import logger
+
+
+def random_name():
+    nice_name = namesgenerator.get_random_name()
+    random_letters = ''.join(chr(random.randint(ord('A'), ord('Z'))) for _ in range(6))
+    return nice_name + '_' + random_letters
+
+
+def flatten_dict(input: Mapping, prefix: Sequence = ()) -> Generator[Tuple[Tuple, Any], None, None]:
+    """Flatten a dictionary into a sequence of (tuple_key, value) tuples
+
+    Example:
+        >>> for k, v in flatten_dict({'a': 1, 'b': {'x': 2, 'y': 3}}):
+        ...     print(k, v)
+        ('a',) 1
+        ('b', 'x') 2
+        ('b', 'y') 3
+
+    """
+    for k, v in input.items():
+        if isinstance(v, Mapping):
+            yield from flatten_dict(v, prefix=(*prefix, k))
+        else:
+            yield (*prefix, k), v
+
+
+def import_(fullname):
+    package, name = fullname.rsplit('.', maxsplit=1)
+    package = importlib.import_module(package)
+    return getattr(package, name)
+
+
+def check_extra_parameters(f, kwargs):
+    signature = inspect.signature(f)
+    if not set(kwargs.keys()).issubset(set(signature.parameters.keys())):
+        logger.warning(f'Extra parameters found for {f}, '
+                       f'expected {{{set(signature.parameters.keys())}}}, '
+                       f'given {{{set(kwargs.keys())}}}')
 
 
 def apples_to_apples(f):

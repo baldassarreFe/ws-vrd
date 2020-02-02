@@ -1,0 +1,34 @@
+name: xib
+comment: default config
+tags:
+  - default
+
+fullname: ${randomname:}
+
+dataset:
+  name: xib.datasets.HicoDet
+  split: .75
+  eager: yes
+  trainval:
+    folder: data/hico_20160224_det
+
+input: {}
+
+dataloader:
+  batch_size: 32
+  num_workers: 1
+
+optimizer:
+  name: torch.optim.Adam
+
+scheduler: {}
+
+loss: {}
+
+checkpoint:
+  every: 1
+  folder: ~/experiments/xib
+
+session:
+  device: cuda
+  max_epochs: 35

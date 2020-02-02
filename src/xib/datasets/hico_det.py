@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import Union, Iterable, List, Tuple, Dict, Optional, Callable
 
 import torch
-from torch.utils.data import Dataset
 from torch_geometric.data import Data
 
 from loguru import logger
@@ -34,22 +33,28 @@ class HicoDetSample(object):
     edge_indices: Optional[torch.Tensor] = None
 
 
-class HicoDet(Dataset):
+class HicoDet(torch.utils.data.Dataset):
     objects: Tuple[str]
     predicates: Tuple[str]
 
-    def __init__(self, samples: List[HicoDetSample], transforms: Optional[Callable] = None):
-        self.samples = samples
+    def __init__(self, folder: Union[str, Path], transforms: Optional[Callable] = None):
+        folder = Path(folder).expanduser().resolve()
+        self.paths = [p for p in folder.iterdir() if p.suffix == '.pth']
+        self.samples = None
         self.transforms = transforms
 
     def __len__(self):
-        return len(self.samples)
+        return len(self.paths)
 
     def __getitem__(self, item):
-        sample = self.samples[item]
+        if self.samples is not None:
+            sample = self.samples[item]
+        else:
+            sample = torch.load(self.paths[item])
+
         target = self._visual_relations_to_binary_targets(sample.gt_visual_relations)
 
-        sample = Data(
+        graph = Data(
             num_nodes=len(sample.detections),
             node_conv_features=sample.node_conv_features,
             node_linear_features=sample.node_linear_features,
@@ -59,9 +64,16 @@ class HicoDet(Dataset):
         )
 
         if self.transforms is not None:
-            sample = self.transforms(sample)
+            graph = self.transforms(graph)
 
-        return sample
+        return graph
+
+    def load_eager(self):
+        start_time = time.perf_counter()
+        self.samples = [torch.load(p) for p in self.paths]
+        logger.info(f'Loaded {sum(len(s.gt_visual_relations) for s in self.samples):,} visual relations from '
+                    f'{len(self.samples):,} images in {time.perf_counter() - start_time:.1f}s')
+
 
     @staticmethod
     def _visual_relations_to_binary_targets(visual_relations: VisualRelations) -> torch.Tensor:
@@ -70,9 +82,10 @@ class HicoDet(Dataset):
         return target.unsqueeze(dim=0)
 
     @classmethod
-    def from_pytorch(cls, pytorch_path: Union[str, Path]):
+    def from_pytorch(cls, folder: Union[str, Path]):
         start_time = time.perf_counter()
-        samples = torch.load(pytorch_path)
+        folder = Path(folder).expanduser().resolve()
+        samples = [torch.load(f) for f in folder.iterdir() if f.suffix == '.pt']
         logger.info(f'Loaded {sum(len(s["visual_relations"]) for s in samples):,} visual relations from '
                     f'{len(samples):,} images in {time.perf_counter() - start_time:.1f}s')
         return cls(samples)
