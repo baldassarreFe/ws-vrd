@@ -38,7 +38,7 @@ class HicoDetMatlabLoader(object):
     _matlab_dict: Optional[dict] = None
     _interaction_triplets: List[Dict[str, str]] = None
 
-    splits = ('train', 'train')
+    splits = ('train', 'test')
 
     def __init__(self, matlab_path: Union[str, Path]):
         self._path = Path(matlab_path).expanduser().resolve()
@@ -210,7 +210,7 @@ def main():
             f'- Detections {det_count:,}\n'
         )
         logger.info(f'\n{message}')
-        with args.output_dir.joinpath(split).joinpath(f'preprocessing_{int(time.time())}.log').open() as f:
+        with args.output_dir.joinpath(split).joinpath(f'preprocessing_{int(time.time())}.log').open(mode='w') as f:
             f.write(message)
 
 

@@ -34,7 +34,7 @@ python -m xib.preprocessing.hico_det \
   --skip-existing \
   --threshold=.3 \
   --detectron-home=~/detectron2 \
-  --output-dir /local_storage/users/fbaldassarre/hico_20160224_det
+  --output-dir=/local_storage/users/fbaldassarre/hico_20160224_det
 ```
 
 ## Visual Relationship Detection
