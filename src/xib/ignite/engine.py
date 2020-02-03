@@ -60,7 +60,11 @@ class Trainer(CustomEngine):
         self.add_event_handler(Events.EPOCH_COMPLETED, Trainer._step_scheduler)
 
     def global_step(self, *_, **__):
-        return getattr(self.state, 'samples', None)
+        """Return the global step based on how many samples have been processed.
+
+        Raises exception if the state is not present (e.g. engine.run() not called)
+        """
+        return self.state.samples
 
     @staticmethod
     def _step_scheduler(trainer: Trainer):

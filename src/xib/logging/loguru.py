@@ -57,7 +57,8 @@ def add_logfile(path: Union[str, Path], format=None, filter=None):
         sink=path,
         format=format,
         colorize=False,
-        filter=filter
+        filter=filter,
+        mode='a'
     )
 
 logger = loguru.logger
