@@ -13,10 +13,10 @@ class InputNodeModel(nn.Module):
             in_linear_features=None,
             conv_channels=0,
             conv_layers=0,
+            lin_features=None,
+            lin_layers=0,
             fc_features=None,
             fc_layers=0,
-            combined_fc_features=None,
-            combined_fc_layers=0,
     ):
         """Input node model without message passing, transforms 1D/3D node features into a 1D vector.
 
@@ -25,10 +25,10 @@ class InputNodeModel(nn.Module):
             in_linear_features:
             conv_channels:
             conv_layers:
+            lin_features:
+            lin_layers:
             fc_features:
             fc_layers:
-            combined_fc_features:
-            combined_fc_layers:
         """
         super(InputNodeModel, self).__init__()
 
@@ -53,18 +53,18 @@ class InputNodeModel(nn.Module):
         self.convs = nn.Sequential(convs)
 
         linear_fcs = OrderedDict()
-        for i in range(fc_layers):
-            linear_fcs[f'linear{i}'] = nn.Linear(in_features, fc_features)
+        for i in range(lin_layers):
+            linear_fcs[f'linear{i}'] = nn.Linear(in_features, lin_features)
             linear_fcs[f'relu{i}'] = nn.ReLU()
-            in_features = fc_features
+            in_features = lin_features
         self.linear_fcs = nn.Sequential(linear_fcs)
 
         # Flatten conv features and concatenate with linear features
         in_features = (in_channels * in_conv_shape[1] * in_conv_shape[2]) + in_features
 
         combined_fcs = OrderedDict()
-        for i in range(combined_fc_layers):
-            combined_fcs[f'linear{i}'] = nn.Linear(in_features, combined_fc_features)
+        for i in range(fc_layers):
+            combined_fcs[f'linear{i}'] = nn.Linear(in_features, fc_features)
             combined_fcs[f'relu{i}'] = nn.ReLU()
             in_features = fc_features
         self.combined_fcs = nn.Sequential(combined_fcs)
