@@ -20,9 +20,12 @@ from omegaconf import OmegaConf
 from torch_geometric.data import Batch
 
 from .utils import import_, random_name
-from .logging import logger, add_logfile, MetricsHandler, OptimizerParamsHandler, EpochHandler
-from .ignite.engine import Trainer, Validator
-from .ignite.metrics import OutputMetricBatch, AveragePrecisionEpoch, AveragePrecisionBatch
+from .logging import logger, add_logfile, \
+    MetricsHandler, OptimizerParamsHandler, EpochHandler
+from .ignite import Trainer, Validator
+from .ignite import OutputMetricBatch
+from .ignite import AveragePrecisionEpoch, AveragePrecisionBatch
+from .ignite import RecallAtBatch, RecallAtEpoch
 
 
 def parse_args():
@@ -164,7 +167,7 @@ def main():
     validator = Validator(validation_step, conf)
 
     trainer.model = validator.model = build_model(conf.model).to(conf.session.device)
-    trainer.optimizer, trainer.scheduler = build_optimizer_and_scheduler(conf.optimizer, trainer.model)
+    trainer.optimizer, scheduler = build_optimizer_and_scheduler(conf.optimizer, trainer.model)
 
     if 'resume' in conf:
         checkpoint = Path(conf.resume.checkpoint).expanduser().resolve()
@@ -172,7 +175,7 @@ def main():
         Checkpoint.load_objects({
             'model': trainer.model,
             'optimizer': trainer.optimizer,
-            'scheduler': trainer.scheduler,
+            'scheduler': scheduler,
             'trainer': trainer,
         }, checkpoint=torch.load(checkpoint, map_location=conf.session.device))
         logger.info(f'Resumed from {checkpoint}, epoch {trainer.state.epoch}, samples {trainer.global_step()}')
@@ -183,6 +186,13 @@ def main():
     # region Training callbacks
     OutputMetricBatch(output_transform=lambda o: o['loss']).attach(trainer, 'loss')
     AveragePrecisionBatch(output_transform=lambda o: (o['target'], o['output'])).attach(trainer, 'avg_prec')
+    RecallAtBatch(output_transform=lambda o: (o['target'], o['output'])).attach(trainer, 'recall_at')
+
+    # Step the learning rate scheduler at the end of every epoch
+    trainer.add_event_handler(
+        Events.EPOCH_COMPLETED,
+        lambda train_engine: scheduler.step(train_engine.state.metrics['loss'])
+    )
 
     # Attach loggers after all metrics
     ProgressBar(persist=True, desc='Train').attach(trainer, metric_names='all')
@@ -208,7 +218,7 @@ def main():
             {
                 'model': trainer.model,
                 'optimizer': trainer.optimizer,
-                'scheduler': trainer.scheduler,
+                'scheduler': scheduler,
                 'trainer': trainer,
             },
             DiskSaver(Path(conf.checkpoint.folder).expanduser().resolve() / conf.fullname),
@@ -222,6 +232,7 @@ def main():
     # region Validation callbacks
     Average(output_transform=lambda o: o['loss']).attach(validator, 'loss')
     AveragePrecisionEpoch(output_transform=lambda o: (o['target'], o['output'])).attach(validator, 'avg_prec')
+    RecallAtEpoch(output_transform=lambda o: (o['target'], o['output'])).attach(validator, 'recall_at')
     validator.add_event_handler(Events.COMPLETED, EarlyStopping(
         patience=10,
         score_function=lambda val_engine: - val_engine.state.metrics['loss'],

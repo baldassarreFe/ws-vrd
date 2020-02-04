@@ -1,15 +1,10 @@
 from __future__ import annotations
 
-import textwrap
-from pathlib import Path
 
-import pyaml as pyaml
 import torch
-from ignite.contrib.handlers import ProgressBar
 from ignite.engine import Engine, Events
 from omegaconf import OmegaConf
 from torch.optim.optimizer import Optimizer
-from torch.optim.lr_scheduler import _LRScheduler
 
 from .metrics import GpuMaxMemoryAllocated
 from ..logging import loguru
@@ -51,13 +46,11 @@ class CustomEngine(Engine):
 
 class Trainer(CustomEngine):
     optimizer: Optimizer
-    scheduler: _LRScheduler
     name = 'train'
 
     def __init__(self, process_function, conf):
         super(Trainer, self).__init__(process_function, conf)
         self.add_event_handler(Events.EPOCH_STARTED, Trainer._setup_training)
-        self.add_event_handler(Events.EPOCH_COMPLETED, Trainer._step_scheduler)
 
     def global_step(self, *_, **__):
         """Return the global step based on how many samples have been processed.
@@ -65,11 +58,6 @@ class Trainer(CustomEngine):
         Raises exception if the state is not present (e.g. engine.run() not called)
         """
         return self.state.samples
-
-    @staticmethod
-    def _step_scheduler(trainer: Trainer):
-        """Step the learning rate scheduler at the end of every epoch"""
-        trainer.scheduler.step(trainer.state.epoch)
 
     @staticmethod
     def _setup_training(trainer: Trainer):
