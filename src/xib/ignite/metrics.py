@@ -3,7 +3,9 @@ from numbers import Number
 from typing import List, Union, Tuple, Optional, Dict
 
 import torch
+import numpy as np
 import sklearn.metrics
+
 from ignite.engine import Events
 from ignite.metrics import Metric
 
@@ -73,7 +75,33 @@ class OutputMetricBatch(BatchMetric):
         return self.value
 
 
-class AveragePrecisionBatch(BatchMetric):
+def mean_average_precision(annotations, scores):
+    """Computes the mean average precision (mAP) for a multi-class multi-label scenario.
+
+    In object detection mAP is the average AP across all classes, i.e.
+    for each class c, compute AP[c] using all samples in the dataset, then take the average across classes.
+
+    Not to bo confounded with:
+    for each sample s, compute the AP[s] considering all classes, then take the average across samples.
+    """
+
+    # The correct behavior (for each class compute the AP using all samples, then average across classes)
+    # corresponds to the `macro` aggregation from scikit-learn.
+    # However, if we are given a small batch it is possible to have a column of all 0s in the annotations matrix,
+    # i.e. none of the samples is positive for that class. It's best to pass `average=None` so that per-class
+    # APs are returned and then compute the mean manually skipping nan values.
+
+    with np.errstate(invalid='ignore'):
+        average_precisions = sklearn.metrics.average_precision_score(
+            y_true=annotations,
+            y_score=scores,
+            average=None
+        )
+
+    return np.nanmean(average_precisions)
+
+
+class MeanAveragePrecisionBatch(BatchMetric):
     avg_precision: float
 
     def reset(self):
@@ -81,17 +109,13 @@ class AveragePrecisionBatch(BatchMetric):
 
     def update(self, output: Tuple[torch.Tensor, torch.Tensor]):
         y_true, y_score = output
-        self.avg_precision = sklearn.metrics.average_precision_score(
-            y_true=y_true,
-            y_score=y_score.sigmoid(),
-            average='micro'
-        )
+        self.avg_precision = mean_average_precision(y_true, y_score)
 
     def compute(self):
         return self.avg_precision
 
 
-class AveragePrecisionEpoch(Metric):
+class MeanAveragePrecisionEpoch(Metric):
     y_true: List[torch.Tensor]
     y_score: List[torch.Tensor]
 
@@ -105,10 +129,9 @@ class AveragePrecisionEpoch(Metric):
         self.y_score.append(y_score)
 
     def compute(self):
-        return sklearn.metrics.average_precision_score(
-            y_true=torch.cat(self.y_true),
-            y_score=torch.cat(self.y_score).sigmoid(),
-            average='micro'
+        return mean_average_precision(
+            torch.cat(self.y_true),
+            torch.cat(self.y_score),
         )
 
 

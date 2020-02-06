@@ -24,7 +24,7 @@ from .logging import logger, add_logfile, \
     MetricsHandler, OptimizerParamsHandler, EpochHandler
 from .ignite import Trainer, Validator
 from .ignite import OutputMetricBatch
-from .ignite import AveragePrecisionEpoch, AveragePrecisionBatch
+from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch
 from .ignite import RecallAtBatch, RecallAtEpoch
 
 
@@ -185,7 +185,7 @@ def main():
 
     # region Training callbacks
     OutputMetricBatch(output_transform=lambda o: o['loss']).attach(trainer, 'loss')
-    AveragePrecisionBatch(output_transform=lambda o: (o['target'], o['output'])).attach(trainer, 'avg_prec')
+    MeanAveragePrecisionBatch(output_transform=lambda o: (o['target'], o['output'])).attach(trainer, 'mAP')
     RecallAtBatch(output_transform=lambda o: (o['target'], o['output'])).attach(trainer, 'recall_at')
 
     # Step the learning rate scheduler at the end of every epoch
@@ -231,7 +231,7 @@ def main():
 
     # region Validation callbacks
     Average(output_transform=lambda o: o['loss']).attach(validator, 'loss')
-    AveragePrecisionEpoch(output_transform=lambda o: (o['target'], o['output'])).attach(validator, 'avg_prec')
+    MeanAveragePrecisionEpoch(output_transform=lambda o: (o['target'], o['output'])).attach(validator, 'mAP')
     RecallAtEpoch(output_transform=lambda o: (o['target'], o['output'])).attach(validator, 'recall_at')
     validator.add_event_handler(Events.COMPLETED, EarlyStopping(
         patience=10,
