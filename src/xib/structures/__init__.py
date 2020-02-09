@@ -1,11 +1,13 @@
-from .boxes import Boxes, area_intersection
+from .boxes import area_intersection, matched_boxlist_union, matched_boxlist_intersection
+from .instances import clone_instances
 from .relations import VisualRelations
-
-from detectron2.structures import Instances
+from .image_size import ImageSize
 
 __all__ = [
-    'Boxes',
     'area_intersection',
+    'matched_boxlist_union',
+    'matched_boxlist_intersection',
+    'clone_instances',
     'VisualRelations',
-    'Instances',
+    'ImageSize',
 ]

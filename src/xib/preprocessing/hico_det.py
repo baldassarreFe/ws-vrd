@@ -1,19 +1,20 @@
 import time
 import argparse
+from enum import Enum
 
-from typing import Union, Iterator, Optional, List, Dict
+from typing import Union, Iterator, Optional, List, Dict, Tuple, Mapping
 from pathlib import Path
 
 import torch
 import scipy.io
+from detectron2.structures import Boxes, Instances
 
 from loguru import logger
 
 from ..utils import SigIntCatcher
-from ..structures import VisualRelations, Boxes
-from ..detectron2 import FeatureExtractor
+from ..structures import VisualRelations, ImageSize
+from ..detectron2 import DetectronWrapper, boxes_to_edge_features
 from ..datasets.hico_det import HicoDet, HicoDetSample
-from ..structures.boxes import boxes_to_node_features, boxes_to_edge_features
 
 
 def parse_args():
@@ -26,7 +27,8 @@ def parse_args():
     parser.add_argument('--output-dir', required=True, type=resolve_path)
     parser.add_argument('--skip-existing', action='store_true')
 
-    parser.add_argument('--threshold', required=True, type=float, default=.3)
+    parser.add_argument('--nms-threshold', required=True, type=float, default=.7)
+    parser.add_argument('--confidence-threshold', required=True, type=float, default=.3)
     parser.add_argument('--detectron-home', required=True, type=resolve_path, default='~/detectron2')
 
     return parser.parse_args()
@@ -38,7 +40,24 @@ class HicoDetMatlabLoader(object):
     _matlab_dict: Optional[dict] = None
     _interaction_triplets: List[Dict[str, str]] = None
 
-    splits = ('train', 'test')
+    class Split(Enum):
+        TRAIN = 'bbox_train', 'images/train2015'
+        TEST = 'bbox_test', 'images/test2015'
+
+        def __init__(self, matlab_name, image_dir):
+            self._matlab_name = matlab_name
+            self._image_dir = image_dir
+
+        @property
+        def matlab_name(self):
+            return self._matlab_name
+
+        def __str__(self):
+            return self.name.lower()
+
+        @property
+        def image_dir(self):
+            return self._image_dir
 
     def __init__(self, matlab_path: Union[str, Path]):
         self._path = Path(matlab_path).expanduser().resolve()
@@ -66,73 +85,153 @@ class HicoDetMatlabLoader(object):
                 })
         return self._interaction_triplets
 
-    def sample_iterator(self, split) -> Iterator[HicoDetSample]:
+    def iter_hico_samples(self, split: Split) -> Iterator[dict]:
         """Iterate over samples from the split passed as parameter"""
-        for img in self.matlab_dict[f'bbox_{split}'].squeeze(0):
-            yield self._parse_one(img)
+        for md in self.matlab_dict[split.matlab_name].squeeze(0):
+            yield HicoDetMatlabLoader._parse_hico(md)
 
-    def _parse_one(self, img) -> HicoDetSample:
-        """Parse one HicoDetSample from the corresponding matlab dict"""
-        filename = img['filename'].item()
-        size = (
-            img['size']['depth'].item().item(),
-            img['size']['height'].item().item(),
-            img['size']['width'].item().item(),
+    def iter_vr_samples(self, split: Split, nms_threshold) -> Iterator[HicoDetSample]:
+        """Iterate over samples from the split passed as parameter"""
+        for hico_dict in self.iter_hico_samples(split):
+            yield self._parse_vr(hico_dict, nms_threshold)
+
+    @staticmethod
+    def _parse_hico(matlab_dict) -> Dict:
+        """Parses one HICO-DET sample from the corresponding matlab dict using the default HICO structure."""
+
+        filename = matlab_dict['filename'].item()
+        size = ImageSize(
+            # img['size']['depth'].item().item(),
+            matlab_dict['size']['height'].item().item(),
+            matlab_dict['size']['width'].item().item(),
         )
-        visual_relations = {
-            'subject_classes': [],
-            'predicate_classes': [],
-            'object_classes': [],
-            'subject_boxes': [],
-            'object_boxes': [],
-        }
+        interactions = []
 
         # All interaction types present in this image
-        for interaction in img['hoi'].squeeze(0):
+        for interaction in matlab_dict['hoi'].squeeze(0):
             interaction_id = interaction['id'].item() - 1
-            num_interactions = interaction['connection'].shape[0]
-            interaction_triplet = self.interaction_triplets[interaction_id]
+
+            bb_subjects: List[Tuple[int, int, int, int]] = []
+            bb_objects: List[Tuple[int, int, int, int]] = []
+            connections: List[Tuple[int, int]] = []
 
             # Invisible interaction, no humans or objects visible
-            if interaction['invis'].item() == 1:
+            visible = interaction['invis'].item() == 0
+
+            if visible:
+                # All subject boxes for this interaction
+                bb_subjects = [
+                    (human['x1'].item(), human['y1'].item(), human['x2'].item(), human['y2'].item())
+                    for human in interaction['bboxhuman'].squeeze(0)
+                ]
+
+                # All object boxes for this interaction
+                bb_objects = [
+                    (object['x1'].item(), object['y1'].item(), object['x2'].item(), object['y2'].item())
+                    for object in interaction['bboxobject'].squeeze(0)
+                ]
+
+                # All instances of this interaction type
+                connections: List[Tuple[int, int]] = []
+                for subject_box_id, object_box_id in interaction['connection']:
+                    connections.append((subject_box_id - 1, object_box_id - 1))
+
+            interactions.append({
+                'interaction_id': interaction_id,
+                'visible': visible,
+                'bb_subjects': bb_subjects,
+                'bb_objects': bb_objects,
+                'connections': connections,
+            })
+
+        hico_dict = {
+            'filename': filename,
+            'size': size,
+            'interactions': interactions
+        }
+
+        return hico_dict
+
+    def _parse_vr(self, hico_dict: Mapping, nms_threshold: float = .7) -> HicoDetSample:
+        """Parse one HicoDetSample from the corresponding hico_dict using the visual relationship structure"""
+
+        # NOTE: interesting images to debug:
+        # hico_dict['filename'] in {
+        #   'HICO_train2015_00000061.jpg',
+        #   'HICO_train2015_00000014.jpg',
+        #   'HICO_train2015_00000009.jpg'
+        # }
+
+        subject_boxes = []
+        subject_classes = []
+
+        object_boxes = []
+        object_classes = []
+
+        subject_indexes = []
+        object_indexes = []
+
+        predicate_classes = []
+
+        for interaction in hico_dict['interactions']:
+            interaction_triplet = self.interaction_triplets[interaction['interaction_id']]
+
+            # Invisible interaction, no humans or objects visible
+            if not interaction['visible']:
                 logger.debug(f'Skipping invisible interaction ('
                              f'{interaction_triplet["subject"]}, '
                              f'{interaction_triplet["predicate"]}, '
-                             f'{interaction_triplet["object"]}) '   
-                             f'in {filename}')
+                             f'{interaction_triplet["object"]}) '
+                             f'in {hico_dict["filename"]}')
                 continue
 
-            visual_relations['subject_classes'].extend([interaction_triplet['subject']] * num_interactions)
-            visual_relations['predicate_classes'].extend([interaction_triplet['predicate']] * num_interactions)
-            visual_relations['object_classes'].extend([interaction_triplet['object']] * num_interactions)
+            subj_offset = len(subject_boxes)
+            obj_offset = len(object_boxes)
+            for subj_idx, obj_idx in interaction['connections']:
+                subject_indexes.append(subj_idx + subj_offset)
+                object_indexes.append(obj_idx + obj_offset)
 
-            # All subjects for this interaction
-            bb_subjects = [
-                (human['x1'].item(), human['y1'].item(), human['x2'].item(), human['y2'].item())
-                for human in interaction['bboxhuman'].squeeze(0)
-            ]
+            subject_boxes.extend(interaction['bb_subjects'])
+            object_boxes.extend(interaction['bb_objects'])
 
-            # All objects for this interaction
-            bb_objects = [
-                (object['x1'].item(), object['y1'].item(), object['x2'].item(), object['y2'].item())
-                for object in interaction['bboxobject'].squeeze(0)
-            ]
+            subject_classes.extend([interaction_triplet['subject']] * len(interaction['bb_subjects']))
+            predicate_classes.extend([interaction_triplet['predicate']] * len(interaction['connections']))
+            object_classes.extend([interaction_triplet['object']] * len(interaction['bb_objects']))
 
-            # All instances of this interaction type
-            for subject_box_id, object_box_id in interaction['connection']:
-                visual_relations['subject_boxes'].append(bb_subjects[subject_box_id - 1])
-                visual_relations['object_boxes'].append(bb_objects[object_box_id - 1])
+        # Stack relationship indexes into a 2xM tensor (possibly 2x0)
+        relation_indexes = torch.tensor([
+            subject_indexes,
+            object_indexes
+        ], dtype=torch.long)
+
+        # TODO merge boxes
+        subject_instances = Instances(
+            hico_dict['size'],
+            classes=torch.tensor(HicoDet.object_name_to_id(subject_classes)),
+            boxes=Boxes(torch.tensor(subject_boxes))
+        )
+        object_instances = Instances(
+            hico_dict['size'],
+            classes=torch.tensor(HicoDet.object_name_to_id(object_classes)),
+            boxes=Boxes(torch.tensor(object_boxes))
+        )
+        # Concatenate subject and object instances into a single list of objects
+        gt_instances = Instances.cat([subject_instances, object_instances])
+
+        # Offset all object indexes since now they appear after all subjects
+        relation_indexes[1, :] += len(subject_instances)
+
+        gt_visual_relations = VisualRelations(
+            instances=gt_instances,
+            predicate_classes=torch.tensor(HicoDet.predicate_name_to_id(predicate_classes)),
+            relation_indexes=relation_indexes,
+        )
 
         return HicoDetSample(
-            filename=filename,
-            img_size=size,
-            gt_visual_relations=VisualRelations(
-                subject_classes=torch.tensor(HicoDet.object_name_to_id(visual_relations['subject_classes'])),
-                predicate_classes=torch.tensor(HicoDet.predicate_name_to_id(visual_relations['predicate_classes'])),
-                object_classes=torch.tensor(HicoDet.object_name_to_id(visual_relations['object_classes'])),
-                subject_boxes=Boxes(torch.tensor(visual_relations['subject_boxes'])),
-                object_boxes=Boxes(torch.tensor(visual_relations['object_boxes'])),
-            )
+            filename=hico_dict['filename'],
+            img_size=hico_dict['size'],
+            gt_instances=gt_instances,
+            gt_visual_relations=gt_visual_relations,
         )
 
 
@@ -149,68 +248,87 @@ def main():
 
     # Build detectron model
     torch.set_grad_enabled(False)
-    feature_extractor = FeatureExtractor.build(detectron_home=args.detectron_home, threshold=args.threshold)
+    detectron = DetectronWrapper(detectron_home=args.detectron_home, threshold=args.confidence_threshold)
 
     # Load ground truth bounding boxes and human-object relations from the matlab file,
     # then process the image with detectron to extract visual features of the boxes.
     should_stop = SigIntCatcher()
     loader = HicoDetMatlabLoader(args.hico_dir / 'anno_bbox.mat')
-    for split in HicoDetMatlabLoader.splits:
+    for split in HicoDetMatlabLoader.Split:
         if should_stop:
             break
         img_count = 0
-        vr_count = 0
-        det_count = 0
+        gt_vr_count = 0
+        gt_det_count = 0
+        d2_det_count = 0
         skipped_images = 0
-        args.output_dir.joinpath(split).mkdir(exist_ok=True)
 
-        for s in loader.sample_iterator(split):
+        output_dir = args.output_dir.joinpath(split.name.lower())
+        output_dir.mkdir(exist_ok=True)
+
+        for s in loader.iter_vr_samples(split, args.nms_threshold):
             if should_stop:
                 break
 
             # If a .pth file already exist we might skip the image
-            output_path = args.output_dir.joinpath(split).joinpath(s.filename).with_suffix('.pth')
+            output_path = output_dir.joinpath(s.filename).with_suffix('.pth')
             if args.skip_existing and output_path.is_file():
                 logger.debug(f'Skipping {split} image with existing .pth file: {s.filename}')
                 continue
 
             # If no ground-truth visual relation is present, we skip the image
             img_count += 1
-            vr_count += len(s.gt_visual_relations)
+            gt_vr_count += len(s.gt_visual_relations)
+            gt_det_count += len(s.gt_instances)
             if len(s.gt_visual_relations) == 0:
-                logger.warning(f'Skipping {split} image without any visible relation: {s.filename}')
+                logger.warning(f'Skipping {split} image without any visible ground-truth relation: {s.filename}')
                 skipped_images += 1
                 continue
 
-            # If detectron can't find any objects, we skip the image
-            feature_pyramid, detections = feature_extractor(args.hico_dir / 'images' / f'{split}2015' / s.filename)
-            det_count += len(detections)
-            if len(detections) == 0:
-                logger.warning(f'Skipping {split} image because detectron could not find any object: {s.filename}')
-                skipped_images += 1
-                continue
+            # Run detectron on the image, extracting features from both the detected and ground-truth objects
+            image_path = args.hico_dir / split.image_dir / s.filename
+            s.d2_feature_pyramid, s.d2_instances, s.gt_instances = detectron(image_path, s.gt_instances)
 
-            s.detections = detections
-            s.node_conv_features = s.detections.features
-            s.node_linear_features = boxes_to_node_features(
-                s.detections.pred_boxes, s.detections.image_size)
-            s.edge_linear_features, s.edge_indices = boxes_to_edge_features(
-                s.detections.pred_boxes, s.detections.image_size)
-            # TODO sample.feature_pyramid is quite big (50-70 MB) and not always needed
-            # sample.feature_pyramid = feature_pyramid
+            # Move everything to cpu
+            s.d2_instances = s.d2_instances.to('cpu')
+            s.d2_feature_pyramid = {l: v.cpu() for l, v in s.d2_feature_pyramid.items()}
+
+            # Counts
+            d2_det_count += len(s.d2_instances)
+            if len(s.d2_instances) == 0:
+                logger.warning(f'Detectron could not find any object in {split} image: {s.filename}')
+
+            # Build a fully connected graph using gt boxes as nodes
+            features, indexes = boxes_to_edge_features(
+                s.gt_visual_relations.instances.boxes, s.gt_visual_relations.instances.image_size)
+            s.gt_visual_relations_full = VisualRelations(
+                relation_indexes=indexes,
+                linear_features=features,
+            )
+
+            # Build a fully connected graph using gt boxes as nodes
+            features, indexes = boxes_to_edge_features(s.d2_instances.boxes, s.d2_instances.image_size)
+            s.d2_visual_relations_full = VisualRelations(
+                relation_indexes=indexes,
+                linear_features=features,
+            )
+
+            # TODO s.feature_pyramid is quite big (50-70 MB) and not always needed
+            del s.d2_feature_pyramid
 
             torch.save(s, output_path)
 
-        message = (
-            f'Split "{split}"\n'
-            f'- Total images {img_count:,}\n'
-            f'- Valid images {img_count - skipped_images:,}\n'
-            f'- Skipped images {skipped_images:,}\n'
-            f'- Visual relations {vr_count:,}\n'
-            f'- Detections {det_count:,}\n'
-        )
+        message = '\n'.join((
+            f'Split "{split}"',
+            f'- Total images {img_count:,}',
+            f'- Valid images {img_count - skipped_images:,}',
+            f'- Skipped images {skipped_images:,}',
+            f'- Ground-truth visual relations {gt_vr_count:,}',
+            f'- Ground-truth instances {gt_det_count:,}',
+            f'- Detectron instances {d2_det_count:,}',
+        ))
         logger.info(f'\n{message}')
-        with args.output_dir.joinpath(split).joinpath(f'preprocessing_{int(time.time())}.log').open(mode='w') as f:
+        with output_dir.joinpath(f'preprocessing_{int(time.time())}.log').open(mode='w') as f:
             f.write(message)
 
 

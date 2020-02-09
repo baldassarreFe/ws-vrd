@@ -57,7 +57,10 @@ def apples_to_apples(f):
         if isinstance(input, (int, str)):
             return f(cls, [input])[0]
         if isinstance(input, (torch.Tensor, np.ndarray)):
-            return np.array(f(cls, input))
+            if input.ndim == 0:
+                return f(cls, [input.item()])[0]
+            else:
+                return np.array(cls, input)
         return f(cls, input)
 
     return wrapper
@@ -70,7 +73,7 @@ class SigIntHandler(object):
 
     def _internal_handler(self, sig, frame):
         signal.signal(signal.SIGINT, self.old_handler)
-        logger.warning('Received SIGINT.')
+        logger.warning('Received SIGINT')
         self.handler()
         self.old_handler = signal.signal(signal.SIGINT, self._internal_handler)
 

@@ -32,7 +32,8 @@ Preprocess for training with:
 python -m xib.preprocessing.hico_det \
   --hico-dir=/local_storage/datasets/hico_20160224_det \
   --skip-existing \
-  --threshold=.3 \
+  --confidence-threshold=.3 \
+  --nms-threshold=.7 \
   --detectron-home=~/detectron2 \
   --output-dir=/local_storage/users/fbaldassarre/hico_20160224_det
 ```
