@@ -7,7 +7,7 @@ from pathlib import Path
 
 import torch
 import scipy.io
-from detectron2.structures import Boxes, Instances
+from detectron2.structures import Boxes, Instances, pairwise_iou
 
 from loguru import logger
 
@@ -157,7 +157,8 @@ class HicoDetMatlabLoader(object):
 
         # NOTE: interesting images to debug:
         # hico_dict['filename'] in {
-        #   'HICO_train2015_00000061.jpg',
+        #   'HICO_train2015_00000001.jpg',
+        #   'HICO_train2015_00000061.jpg', # 2 people, 1 motorbike, many actions
         #   'HICO_train2015_00000014.jpg',
         #   'HICO_train2015_00000009.jpg'
         # }
@@ -198,32 +199,35 @@ class HicoDetMatlabLoader(object):
             predicate_classes.extend([interaction_triplet['predicate']] * len(interaction['connections']))
             object_classes.extend([interaction_triplet['object']] * len(interaction['bb_objects']))
 
-        # Stack relationship indexes into a 2xM tensor (possibly 2x0)
+        # Concatenate subject and object instances into a single list of objects
+        boxes = Boxes(torch.tensor(subject_boxes + object_boxes))
+        classes = torch.tensor(HicoDet.object_name_to_id(subject_classes + object_classes), dtype=torch.long)
+
+        # Stack relationship indexes into a 2xM tensor (possibly 2x0),
+        # also offset all object indexes since now they appear after all subjects
         relation_indexes = torch.tensor([
             subject_indexes,
             object_indexes
         ], dtype=torch.long)
+        relation_indexes[1, :] += len(subject_boxes)
 
-        # TODO merge boxes
-        subject_instances = Instances(
-            hico_dict['size'],
-            classes=torch.tensor(HicoDet.object_name_to_id(subject_classes)),
-            boxes=Boxes(torch.tensor(subject_boxes))
+        # Merge boxes that overlap and have the same label
+        boxes, classes, relation_indexes = HicoDetMatlabLoader._merge_overlapping(
+            boxes=boxes,
+            classes=classes,
+            relation_indexes=relation_indexes,
+            nms_threshold=nms_threshold,
         )
-        object_instances = Instances(
-            hico_dict['size'],
-            classes=torch.tensor(HicoDet.object_name_to_id(object_classes)),
-            boxes=Boxes(torch.tensor(object_boxes))
-        )
-        # Concatenate subject and object instances into a single list of objects
-        gt_instances = Instances.cat([subject_instances, object_instances])
 
-        # Offset all object indexes since now they appear after all subjects
-        relation_indexes[1, :] += len(subject_instances)
+        gt_instances = Instances(
+            hico_dict['size'],
+            classes=classes,
+            boxes=boxes
+        )
 
         gt_visual_relations = VisualRelations(
             instances=gt_instances,
-            predicate_classes=torch.tensor(HicoDet.predicate_name_to_id(predicate_classes)),
+            predicate_classes=torch.tensor(HicoDet.predicate_name_to_id(predicate_classes), dtype=torch.long),
             relation_indexes=relation_indexes,
         )
 
@@ -233,6 +237,30 @@ class HicoDetMatlabLoader(object):
             gt_instances=gt_instances,
             gt_visual_relations=gt_visual_relations,
         )
+
+    @staticmethod
+    def _merge_overlapping(boxes: Boxes, classes: torch.LongTensor,
+                           relation_indexes: torch.LongTensor, nms_threshold: float):
+        iou_above_thres = pairwise_iou(boxes, boxes) > nms_threshold
+        iou_above_thres[classes[:, None] != classes[None, :]] = False
+
+        keep = []
+        visited = torch.full((len(boxes),), False, dtype=torch.bool)
+        relation_indexes = relation_indexes.clone()
+
+        for old_box_idx, skip in enumerate(visited):
+            if skip:
+                continue
+            new_box_idx = len(keep)
+            keep.append(old_box_idx)
+
+            matches = torch.nonzero(iou_above_thres[old_box_idx, :] & ~visited, as_tuple=True)[0]
+            visited[matches] = True
+
+            rel_idx_to_fix = torch.any(relation_indexes[:, :, None] == matches[None, None, :], dim=2)
+            relation_indexes[rel_idx_to_fix] = new_box_idx
+
+        return boxes[keep], classes[keep], relation_indexes
 
 
 @logger.catch
@@ -319,7 +347,7 @@ def main():
             torch.save(s, output_path)
 
         message = '\n'.join((
-            f'Split "{split}"',
+            f'Split "{split}":',
             f'- Total images {img_count:,}',
             f'- Valid images {img_count - skipped_images:,}',
             f'- Skipped images {skipped_images:,}',

@@ -143,11 +143,16 @@ class DetectronWrapper(object):
         for name, inst in {'detectron': detections, 'other': other_instances}.items():
             for i in range(len(inst)):
                 x0, y0, x1, y1 = inst.boxes.tensor[i].cpu().numpy()
+                try:
+                    score = inst.scores[i]
+                except:
+                    score = 1
                 fig, ax = plt.subplots(1, 1, figsize=(original_size.width / 640 * 12, original_size.height / 640 * 12))
                 ax.imshow(cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB))
                 ax.scatter(x0, y0, marker='o', c='r', zorder=1000, label=f'TL ({x0:.0f}, {y0:.0f})')
                 ax.scatter(x1, y1, marker='D', c='r', zorder=1000, label=f'BR ({x1:.0f}, {y1:.0f})')
-                ax.set_title(f'{image_path.name} {original_size} - {name} {HicoDet.object_id_to_name(inst.classes[i])}')
+                ax.set_title(f'{image_path.name} {original_size} - '
+                             f'{HicoDet.object_id_to_name(inst.classes[i])} ({name}: {score:.1%})')
                 ax.add_patch(plt.Rectangle(
                     (x0, y0),
                     width=x1 - x0,
@@ -156,6 +161,8 @@ class DetectronWrapper(object):
                     linewidth=3,
                     color='blue'
                 ))
+                ax.set_xlim([0, original_size.width])
+                ax.set_ylim([original_size.height, 0])
                 ax.legend()
                 fig.tight_layout()
                 plt.show()
