@@ -19,7 +19,8 @@ from ignite.handlers import Checkpoint, DiskSaver, EarlyStopping
 from ignite.contrib.handlers import TensorboardLogger, ProgressBar
 from ignite.contrib.handlers.tensorboard_logger import OutputHandler
 
-from .utils import parse_args, import_
+from .utils import import_
+from .config import parse_args
 from .ignite import Trainer, Validator
 from .ignite import RecallAtBatch, RecallAtEpoch
 from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch

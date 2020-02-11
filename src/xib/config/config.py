@@ -24,12 +24,3 @@ def parse_args():
     # Make sure everything is resolved
     conf = OmegaConf.create(OmegaConf.to_container(conf, resolve=True))
     return conf
-
-
-def print_config():
-    conf = parse_args()
-    print(conf.pretty())
-
-
-if __name__ == '__main__':
-    print_config()
