@@ -106,20 +106,21 @@ def build_optimizer_and_scheduler(conf: OmegaConf, model: torch.nn.Module) -> Tu
     return optimizer, scheduler
 
 
-def build_dataloaders(conf):
+def build_dataloaders(conf) -> Tuple[DataLoader, DataLoader, Callable[[], None]]:
     dataset_class = import_(conf.dataset.name)
 
     if 'trainval' in conf.dataset and 'split' in conf.dataset:
         dataset = dataset_class(**conf.dataset.trainval)
-        if conf.dataset.eager:
-            dataset.load_eager()
         train_split = int(conf.dataset.split * len(dataset))
         val_split = len(dataset) - train_split
         train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_split, val_split])
+
+        eager_op = dataset.load_eager
     elif 'train' in conf.dataset and 'val' in conf.dataset:
         train_dataset = dataset_class(**conf.dataset.train)
         val_dataset = dataset_class(**conf.dataset.val)
-        if conf.dataset.eager:
+
+        def eager_op():
             train_dataset.load_eager()
             val_dataset.load_eager()
     else:
@@ -128,6 +129,10 @@ def build_dataloaders(conf):
     logger.info(f'Train/Val split: {len(train_dataset)}/{len(val_dataset)} '
                 f'{len(train_dataset) / (len(train_dataset) + len(val_dataset)):.1%}/'
                 f'{len(val_dataset) / (len(train_dataset) + len(val_dataset)):.1%}')
+
+    if not conf.dataset.eager:
+        def eager_op():
+            pass
 
     train_dataloader = DataLoader(
         train_dataset,
@@ -147,7 +152,7 @@ def build_dataloaders(conf):
         drop_last=True
     )
 
-    return train_dataloader, val_dataloader
+    return train_dataloader, val_dataloader, eager_op
 
 
 def build_model(conf: OmegaConf) -> torch.nn.Module:
@@ -179,7 +184,7 @@ def main():
         }, checkpoint=torch.load(checkpoint, map_location=conf.session.device))
         logger.info(f'Resumed from {checkpoint}, epoch {trainer.state.epoch}, samples {trainer.global_step()}')
 
-    train_dataloader, val_dataloader = build_dataloaders(conf)
+    train_dataloader, val_dataloader, load_datasets_eager = build_dataloaders(conf)
     # endregion
 
     # region Training callbacks
@@ -255,7 +260,7 @@ def main():
     # endregion
 
     # Log configuration before starting
-    yaml = pyaml.dump(OmegaConf.to_container(trainer.conf), safe=True, sort_dicts=False, force_embed=True)
+    yaml = pyaml.dump(OmegaConf.to_container(conf), safe=True, sort_dicts=False, force_embed=True)
     logger.info('\n' + yaml)
     global_step = trainer.global_step() if 'resume' in conf else 0
     tb_logger.writer.add_text('Configuration', textwrap.indent(yaml, '    '), global_step)
@@ -265,6 +270,7 @@ def main():
         f.write(yaml)
 
     # Finally run
+    load_datasets_eager()
     trainer.run(train_dataloader, max_epochs=conf.session.max_epochs)
     tb_logger.close()
 

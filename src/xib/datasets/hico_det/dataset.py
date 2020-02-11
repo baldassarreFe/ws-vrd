@@ -96,16 +96,23 @@ class HicoDet(torch.utils.data.Dataset):
         return graph
 
     def load_eager(self):
-        logger.debug(f'Starting to load {len(self.paths)} .pth files')
+        if self.graphs is not None:
+            return
+
         vr_count = 0
+        inst_count = 0
         self.graphs = []
         start_time = time.perf_counter()
         for p in tqdm(self.paths, desc='Loading', unit='g'):
             g = self.make_graph(torch.load(p))
-            vr_count += g.target_bce.shape[1]
+            vr_count += g.target_bce.sum().int().item()
+            inst_count += g.num_nodes
             self.graphs.append(g)
-        logger.info(f'Loaded {vr_count:,} visual relations from '
-                    f'{len(self.paths):,} .pth files in {time.perf_counter() - start_time:.1f}s')
+        logger.info(f'Loaded '
+                    f'{inst_count:,} {self.input_mode.name.lower()} instances with '
+                    f'{vr_count:,} gt visual relations '
+                    f'from {len(self.paths):,} .pth files '
+                    f'in {time.perf_counter() - start_time:.1f}s')
 
     @classmethod
     @apples_to_apples
