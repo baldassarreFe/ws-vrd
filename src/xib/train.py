@@ -26,6 +26,7 @@ from .ignite import RecallAtBatch, RecallAtEpoch
 from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch
 from .ignite import MetricsHandler, OptimizerParamsHandler, EpochHandler
 from .logging import logger, add_logfile, add_custom_scalars
+from .logging.hyperparameters import add_hparam_summary, add_session_start, add_session_end
 
 
 def setup_logging(conf: OmegaConf) -> TensorboardLogger:
@@ -35,6 +36,7 @@ def setup_logging(conf: OmegaConf) -> TensorboardLogger:
 
     tb_logger = TensorboardLogger(folder)
     add_custom_scalars(tb_logger.writer)
+    add_hparam_summary(tb_logger.writer, conf.hparams)
 
     return tb_logger
 
@@ -276,7 +278,9 @@ def main():
 
     # Finally run
     load_datasets_eager()
+    add_session_start(tb_logger.writer, conf.hparams)
     trainer.run(train_dataloader, max_epochs=conf.session.max_epochs)
+    add_session_end(tb_logger.writer, 'SUCCESS')
     tb_logger.close()
 
 

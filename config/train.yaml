@@ -3,10 +3,6 @@ comment: default config
 tags:
   - default
 
-fullname: "lbce${losses.bce.weight}_lrank${losses.rank.weight}_lwd${optimizer.weight_decay}_\
-fcl${model.input_node_model.fc_layers}_fcf${model.input_node_model.fc_features}_\
-${randomname:}"
-
 dataset:
   name: xib.datasets.HicoDet
   split: .75
@@ -36,10 +32,15 @@ losses:
 
 checkpoint:
   every: 1
-  folder: ~/experiments/xib
+  folder: ~/experiments/xib/runs
 
 session:
   device: cuda
   max_epochs: 35
   early_stopping:
     patience: 5
+
+hparams:
+  loss/bce--lbce: ${losses.bce.weight}
+  loss/rank--lrank: ${losses.rank.weight}
+  opt/weight_decay--wd: ${optimizer.weight_decay}

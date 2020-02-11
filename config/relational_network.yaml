@@ -20,3 +20,8 @@ model:
     fc_features: 256
     fc_layers: 2
     num_classes: 117
+
+hparams:
+  model/conv_layers--cvl: ${model.input_node_model.conv_layers}
+  model/fc_layers--fcl: ${model.input_node_model.fc_layers}
+  model/fc_features--fcf: ${model.input_node_model.fc_features}
