@@ -32,9 +32,7 @@ def apples_to_apples(f):
             if input.ndim == 0:
                 return f(cls, [input.item()])[0]
             else:
-                return np.array(cls, input)
+                return np.array(f(cls, input))
         return f(cls, input)
 
     return wrapper
-
-

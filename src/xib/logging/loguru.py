@@ -7,7 +7,11 @@ import tqdm as _tqdm
 from pathlib import Path
 
 # Disable ignite debug messages
-_default_filter = {'ignite': 'INFO', '': True}
+_default_filter = {
+    'ignite': 'INFO',
+    'matplotlib': 'WARNING',
+    '': True,
+}
 
 # Default loguru format, but with time in UTC
 _default_format = (
@@ -60,5 +64,6 @@ def add_logfile(path: Union[str, Path], format=None, filter=None):
         filter=filter,
         mode='a'
     )
+
 
 logger = loguru.logger

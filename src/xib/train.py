@@ -7,9 +7,10 @@ from pathlib import Path
 import pyaml
 import torch
 import torch.utils.data
+from torch.utils.data import DataLoader
 from torch.optim.optimizer import Optimizer
 
-from torch_geometric.data import Batch, DataLoader
+from torch_geometric.data import Batch
 
 from omegaconf import OmegaConf
 
@@ -21,6 +22,7 @@ from ignite.contrib.handlers.tensorboard_logger import OutputHandler
 
 from .utils import import_
 from .config import parse_args
+from .ignite import PredictImages
 from .ignite import Trainer, Validator
 from .ignite import RecallAtBatch, RecallAtEpoch
 from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch
@@ -41,8 +43,8 @@ def setup_logging(conf: OmegaConf) -> TensorboardLogger:
     return tb_logger
 
 
-def training_step(trainer: Trainer, graphs: Batch):
-    graphs = graphs.to(trainer.conf.session.device)
+def training_step(trainer: Trainer, batch: Tuple[Batch, Any]):
+    graphs = batch[0].to(trainer.conf.session.device)
     output = trainer.model(graphs)
 
     loss, loss_dict = criterion(trainer.conf.losses, output, graphs)
@@ -58,8 +60,8 @@ def training_step(trainer: Trainer, graphs: Batch):
     }
 
 
-def validation_step(validator: Validator, graphs: Batch):
-    graphs = graphs.to(validator.conf.session.device)
+def validation_step(validator: Validator, batch: Tuple[Batch, Any]):
+    graphs = batch[0].to(validator.conf.session.device)
     output = validator.model(graphs)
 
     _, loss_dict = criterion(validator.conf.losses, output, graphs)
@@ -141,13 +143,20 @@ def build_dataloaders(conf) -> Tuple[DataLoader, DataLoader, Callable[[], None]]
         def eager_op():
             pass
 
+    def collate_fn(batch):
+        return (
+            Batch.from_data_list([graph for graph, _ in batch]),
+            [sample for _, sample in batch]
+        )
+
     train_dataloader = DataLoader(
         train_dataset,
         batch_size=conf.dataloader.batch_size,
         shuffle=True,
         num_workers=conf.dataloader.num_workers,
         pin_memory='cuda' in conf.session.device,
-        drop_last=True
+        drop_last=True,
+        collate_fn=collate_fn
     )
 
     val_dataloader = DataLoader(
@@ -156,7 +165,8 @@ def build_dataloaders(conf) -> Tuple[DataLoader, DataLoader, Callable[[], None]]
         shuffle=True,
         num_workers=conf.dataloader.num_workers,
         pin_memory='cuda' in conf.session.device,
-        drop_last=True
+        drop_last=True,
+        collate_fn=collate_fn
     )
 
     return train_dataloader, val_dataloader, eager_op
@@ -221,15 +231,22 @@ def main():
         Events.ITERATION_COMPLETED
     )
 
+    trainer.add_event_handler(
+        Events.EPOCH_COMPLETED,
+        PredictImages(grid=(2, 3), img_dir=conf.dataset.image_dir, tag='train',
+                      logger=tb_logger.writer, global_step_fn=trainer.global_step)
+    )
     tb_logger.attach(
         trainer,
         EpochHandler(trainer, tag='z', global_step_transform=trainer.global_step),
         Events.EPOCH_COMPLETED
     )
+
     trainer.add_event_handler(Events.EPOCH_COMPLETED, lambda _: validator.run(val_dataloader))
     # endregion
 
     # region Validation callbacks
+    # PredictImages(output_transform=itemgetter('target', 'output')).attach(validator)
     if conf.losses['bce']['weight'] > 0:
         Average(output_transform=lambda o: o['losses']['loss/bce']).attach(validator, 'loss/bce')
     if conf.losses['rank']['weight'] > 0:
@@ -244,11 +261,6 @@ def main():
         Events.EPOCH_COMPLETED,
         lambda val_engine: scheduler.step(val_engine.state.metrics['loss/total'])
     )
-    validator.add_event_handler(Events.COMPLETED, EarlyStopping(
-        patience=conf.session.early_stopping.patience,
-        score_function=lambda val_engine: - val_engine.state.metrics['loss/total'],
-        trainer=trainer
-    ))
     tb_logger.attach(
         validator,
         MetricsHandler('val', global_step_transform=trainer.global_step),
@@ -258,6 +270,16 @@ def main():
         Events.EPOCH_COMPLETED,
         log_validation_metrics
     )
+    validator.add_event_handler(
+        Events.EPOCH_COMPLETED,
+        PredictImages(grid=(2, 3), img_dir=conf.dataset.image_dir, tag='val',
+                      logger=tb_logger.writer, global_step_fn=trainer.global_step)
+    )
+    validator.add_event_handler(Events.COMPLETED, EarlyStopping(
+        patience=conf.session.early_stopping.patience,
+        score_function=lambda val_engine: - val_engine.state.metrics['loss/total'],
+        trainer=trainer
+    ))
     validator.add_event_handler(
         Events.COMPLETED,
         Checkpoint(

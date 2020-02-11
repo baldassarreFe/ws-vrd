@@ -1,4 +1,5 @@
 from .engine import CustomEngine, Trainer, Validator
+from .metrics import PredictImages
 from .metrics import GpuMaxMemoryAllocated
 from .metrics import RecallAtBatch, RecallAtEpoch
 from .metrics import MeanAveragePrecisionBatch, MeanAveragePrecisionEpoch
@@ -8,6 +9,7 @@ __all__ = [
     'CustomEngine',
     'Trainer',
     'Validator',
+    'PredictImages',
     'GpuMaxMemoryAllocated',
     'MeanAveragePrecisionBatch',
     'MeanAveragePrecisionEpoch',

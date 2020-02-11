@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-
 import torch
 from ignite.engine import Engine, Events
 from omegaconf import OmegaConf
 from torch.optim.optimizer import Optimizer
+from torch_geometric.data import Batch
 
 from .metrics import GpuMaxMemoryAllocated
 from ..logging import loguru
@@ -41,7 +41,8 @@ class CustomEngine(Engine):
 
     @staticmethod
     def _increment_samples(engine: Engine):
-        engine.state.samples += engine.state.batch.num_graphs
+        graphs: Batch = engine.state.batch[0]
+        engine.state.samples += graphs.num_graphs
 
 
 class Trainer(CustomEngine):

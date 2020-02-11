@@ -45,17 +45,19 @@ class HicoDet(torch.utils.data.Dataset):
         if len(self.paths) == 0:
             logger.warning(f'Empty dataloader: no .pth file found in {folder}')
 
-        self.graphs = None
+        self.samples = []
+        self.loaded = False
         self.transforms = transforms
 
     def __len__(self):
         return len(self.paths)
 
     def __getitem__(self, item):
-        if self.graphs is not None:
-            graph = self.graphs[item]
+        if self.loaded:
+            graph, sample = self.samples[item]
         else:
-            graph = self.make_graph(torch.load(self.paths[item]))
+            sample = torch.load(self.paths[item])
+            graph = self.make_graph(sample)
 
         if self.transforms is not None:
             graph = self.transforms(graph)
@@ -65,7 +67,7 @@ class HicoDet(torch.utils.data.Dataset):
             # Batch.from_data_list(...) it will cause a miscount in batch.num_graphs
             logger.warning(f'Loaded graph without nodes for: {graph.filename}')
 
-        return graph
+        return graph, sample
 
     def make_graph(self, sample: HicoDetSample) -> Data:
         if self.input_mode is HicoDet.InputMode.GT:
@@ -96,23 +98,25 @@ class HicoDet(torch.utils.data.Dataset):
         return graph
 
     def load_eager(self):
-        if self.graphs is not None:
+        if self.loaded:
             return
 
         vr_count = 0
         inst_count = 0
-        self.graphs = []
+        self.samples = []
         start_time = time.perf_counter()
         for p in tqdm(self.paths, desc='Loading', unit='g'):
-            g = self.make_graph(torch.load(p))
+            s = torch.load(p)
+            g = self.make_graph(s)
             vr_count += g.target_bce.sum().int().item()
             inst_count += g.num_nodes
-            self.graphs.append(g)
+            self.samples.append((g, s))
         logger.info(f'Loaded '
                     f'{inst_count:,} {self.input_mode.name.lower()} instances with '
                     f'{vr_count:,} gt visual relations '
                     f'from {len(self.paths):,} .pth files '
                     f'in {time.perf_counter() - start_time:.1f}s')
+        self.loaded = True
 
     @classmethod
     @apples_to_apples

@@ -1,12 +1,18 @@
 from abc import ABC, abstractmethod
-from typing import List, Tuple, Optional, Dict
+from pathlib import Path
+from typing import List, Tuple, Optional, Dict, Union, Iterator, Callable
 
 import torch
 import numpy as np
 import sklearn.metrics
+import matplotlib.pyplot as plt
 
-from ignite.engine import Events
+from ignite.engine import Events, Engine
 from ignite.metrics import Metric
+from tensorboardX import SummaryWriter
+from torch_geometric.data import Batch
+
+from ..datasets.hico_det import HicoDet, HicoDetSample
 
 
 class NoInputMetric(Metric, ABC):
@@ -213,7 +219,7 @@ def recall_at(annotations, scores, sizes):
     num_rel = annotations.sum(dim=1, keepdims=True)
     recall = cumsum / num_rel
     for s in sizes:
-        result[s] = recall[:, s-1].mean(axis=0).item()
+        result[s] = recall[:, s - 1].mean(axis=0).item()
 
     return result
 
@@ -269,3 +275,63 @@ class RecallAtEpoch(Metric):
         result = self.compute()
         for k, v in result.items():
             engine.state.metrics[f'{name}_{k}'] = v
+
+
+class PredictImages(object):
+    def __init__(
+            self,
+            grid: Tuple[int, int],
+            img_dir: Union[str, Path],
+            tag: str,
+            logger: SummaryWriter,
+            global_step_fn: Callable[[], int]
+    ):
+        self.grid = grid
+        self.img_dir = Path(img_dir).expanduser().resolve()
+        self.tag = tag
+        self.logger = logger
+        self.global_step_fn = global_step_fn
+
+    def __call__(self, engine: Engine):
+        samples: List[HicoDetSample] = engine.state.batch[1]
+        preds = engine.state.output['output'].sigmoid()
+        targets = engine.state.output['target']
+
+        fig, axes = plt.subplots(*self.grid, figsize=(16, 12), dpi=50)
+        axes_iter: Iterator[plt.Axes] = axes.flat
+
+        for target, pred, sample, ax in zip(targets, preds, samples, axes_iter):
+            image = sample.load_image(img_dir=self.img_dir)
+
+            ax.imshow(image)
+            ax.set_title(f'{sample.filename} {sample.img_size}')
+
+            target_str = HicoDet.predicate_id_to_name(sample.gt_visual_relations.predicate_classes.unique(sorted=True))
+            ax.text(
+                0.05, 0.95,
+                '\n'.join(target_str),
+                transform=ax.transAxes,
+                fontsize=11,
+                verticalalignment='top',
+                bbox=dict(boxstyle='square', facecolor='white', alpha=0.8)
+            )
+
+            top_5 = torch.argsort(pred, descending=True)[:5]
+            prediction_str = [f'{pred[i]:.1%} {HicoDet.predicates[i]}' for i in top_5]
+            ax.text(
+                0.65, 0.95,
+                '\n'.join(prediction_str),
+                transform=ax.transAxes,
+                fontsize=11,
+                verticalalignment='top',
+                bbox=dict(boxstyle='square', facecolor='white', alpha=0.8)
+            )
+
+            ax.tick_params(which='both', **{k: False for k in ('bottom', 'top', 'left', 'right',
+                                                               'labelbottom', 'labeltop', 'labelleft', 'labelright')})
+            ax.set_xlim(0, sample.img_size.width)
+            ax.set_ylim(sample.img_size.height, 0)
+
+        fig.tight_layout()
+
+        self.logger.add_figure(f'{self.tag}', fig, self.global_step_fn(), close=True)

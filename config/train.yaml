@@ -7,6 +7,7 @@ dataset:
   name: xib.datasets.HicoDet
   split: .75
   eager: yes
+  image_dir: data/raw/hico_20160224_det/images/train2015
   trainval:
     folder: data/processed/hico_20160224_det/train
     input_mode: GT

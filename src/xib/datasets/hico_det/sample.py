@@ -31,11 +31,16 @@ class HicoDetSample(object):
         if not isinstance(self.img_size, ImageSize):
             self.img_size = ImageSize(*self.img_size)
 
-    def show_instances(self, img_dir: Path):
+    def load_image(self, img_dir):
         import cv2
+        image = cv2.imread(img_dir.expanduser().joinpath(self.filename).resolve().as_posix())
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        return image
+
+    def show_instances(self, img_dir: Path):
         import matplotlib.pyplot as plt
 
-        image = cv2.imread(img_dir.expanduser().joinpath(self.filename).resolve().as_posix())
+        image = self.load_image(img_dir)
 
         instances = {}
         if self.gt_instances is not None:
@@ -51,7 +56,7 @@ class HicoDetSample(object):
                 except AttributeError:
                     score = 1
                 fig, ax = plt.subplots(1, 1, figsize=(self.img_size.width / 640 * 12, self.img_size.height / 640 * 12))
-                ax.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+                ax.imshow(image)
                 ax.scatter(x0, y0, marker='o', c='r', zorder=1000, label=f'TL ({x0:.0f}, {y0:.0f})')
                 ax.scatter(x1, y1, marker='D', c='r', zorder=1000, label=f'BR ({x1:.0f}, {y1:.0f})')
                 ax.set_title(f'{self.filename} {self.img_size} - '
