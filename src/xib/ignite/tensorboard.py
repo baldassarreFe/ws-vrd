@@ -1,10 +1,11 @@
+from torch.optim .optimizer import Optimizer
+
 from ignite.engine import Engine, Events
 from ignite.contrib.handlers.base_logger import BaseHandler
 from ignite.contrib.handlers.tensorboard_logger import TensorboardLogger
 from ignite.contrib.handlers.tensorboard_logger import OptimizerParamsHandler as _OptimizerParamsHandler
-from torch.optim .optimizer import Optimizer
 
-from ..ignite import CustomEngine
+from .engine import CustomEngine
 
 
 class MetricsHandler(BaseHandler):

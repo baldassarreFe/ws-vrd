@@ -1,4 +1,3 @@
-import sys
 import textwrap
 from operator import itemgetter
 
@@ -20,26 +19,12 @@ from ignite.handlers import Checkpoint, DiskSaver, EarlyStopping
 from ignite.contrib.handlers import TensorboardLogger, ProgressBar
 from ignite.contrib.handlers.tensorboard_logger import OutputHandler
 
-from .utils import import_, random_name
-from .logging import logger, add_logfile, MetricsHandler, OptimizerParamsHandler, EpochHandler
+from .utils import parse_args, import_
 from .ignite import Trainer, Validator
-from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch
 from .ignite import RecallAtBatch, RecallAtEpoch
-
-
-def parse_args():
-    OmegaConf.register_resolver('randomname', random_name)
-
-    conf = OmegaConf.create()
-    for s in sys.argv[1:]:
-        if s.endswith('.yaml'):
-            conf.merge_with(OmegaConf.load(s))
-        else:
-            conf.merge_with_dotlist([s])
-
-    # Make sure everything is resolved
-    conf = OmegaConf.create(OmegaConf.to_container(conf, resolve=True))
-    return conf
+from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch
+from .ignite import MetricsHandler, OptimizerParamsHandler, EpochHandler
+from .logging import logger, add_logfile
 
 
 def setup_logging(conf: OmegaConf) -> TensorboardLogger:
