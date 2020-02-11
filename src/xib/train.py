@@ -249,7 +249,7 @@ def main():
         lambda val_engine: scheduler.step(val_engine.state.metrics['loss/total'])
     )
     validator.add_event_handler(Events.COMPLETED, EarlyStopping(
-        patience=10,
+        patience=conf.session.early_stopping.patience,
         score_function=lambda val_engine: - val_engine.state.metrics['loss/total'],
         trainer=trainer
     ))

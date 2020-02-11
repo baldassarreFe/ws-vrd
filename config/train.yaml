@@ -41,3 +41,5 @@ checkpoint:
 session:
   device: cuda
   max_epochs: 35
+  early_stopping:
+    patience: 5
