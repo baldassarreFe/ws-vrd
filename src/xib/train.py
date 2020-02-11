@@ -168,11 +168,11 @@ def build_model(conf: OmegaConf) -> torch.nn.Module:
     return model
 
 
-def log__validation_metrics(validator: Validator):
+def log_validation_metrics(validator: Validator):
     logger.info(f'\n{pyaml.dump(validator.state.metrics, safe=True, sort_dicts=False, force_embed=True)}')
 
 
-@logger.catch
+@logger.catch(reraise=True)
 def main():
     # region Setup
     conf = parse_args()
@@ -226,20 +226,6 @@ def main():
         EpochHandler(trainer, tag='z', global_step_transform=trainer.global_step),
         Events.EPOCH_COMPLETED
     )
-    trainer.add_event_handler(
-        Events.EPOCH_COMPLETED(every=conf.checkpoint.every),
-        Checkpoint(
-            {
-                'model': trainer.model,
-                'optimizer': trainer.optimizer,
-                'scheduler': scheduler,
-                'trainer': trainer,
-            },
-            DiskSaver(Path(conf.checkpoint.folder).expanduser().resolve() / conf.fullname),
-            n_saved=None,
-            global_step_transform=trainer.global_step
-        )
-    )
     trainer.add_event_handler(Events.EPOCH_COMPLETED, lambda _: validator.run(val_dataloader))
     # endregion
 
@@ -270,7 +256,18 @@ def main():
     )
     validator.add_event_handler(
         Events.EPOCH_COMPLETED,
-        log__validation_metrics
+        log_validation_metrics
+    )
+    validator.add_event_handler(
+        Events.COMPLETED,
+        Checkpoint(
+            {'model': trainer.model, 'optimizer': trainer.optimizer, 'scheduler': scheduler, 'trainer': trainer},
+            DiskSaver(Path(conf.checkpoint.folder).expanduser().resolve() / conf.fullname),
+            score_function=lambda val_engine: val_engine.state.metrics['recall_at_10'],
+            score_name='recall_at_10',
+            n_saved=conf.checkpoint.keep,
+            global_step_transform=trainer.global_step
+        )
     )
     # endregion
 
@@ -279,14 +276,16 @@ def main():
     logger.info('\n' + yaml)
     global_step = trainer.global_step() if 'resume' in conf else 0
     tb_logger.writer.add_text('Configuration', textwrap.indent(yaml, '    '), global_step)
-    tb_logger.writer.flush()  # Prevent tensorboard complaining "Unable to get first event timestamp"
+    add_session_start(tb_logger.writer, conf.hparams)
+    tb_logger.writer.flush()
     p = Path(conf.checkpoint.folder).expanduser() / conf.fullname / f'conf.{global_step}.yaml'
     with p.open(mode='w') as f:
         f.write(yaml)
 
-    # Finally run
+    # If requested, load datasets eagerly
     load_datasets_eager()
-    add_session_start(tb_logger.writer, conf.hparams)
+
+    # Finally run
     trainer.run(train_dataloader, max_epochs=conf.session.max_epochs)
     add_session_end(tb_logger.writer, 'SUCCESS')
     tb_logger.close()

@@ -31,7 +31,7 @@ losses:
     weight: 1.
 
 checkpoint:
-  every: 1
+  keep: 3
   folder: ~/experiments/xib/runs
 
 session:
