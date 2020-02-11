@@ -168,6 +168,10 @@ def build_model(conf: OmegaConf) -> torch.nn.Module:
     return model
 
 
+def log__validation_metrics(validator: Validator):
+    logger.info(f'\n{pyaml.dump(validator.state.metrics, safe=True, sort_dicts=False, force_embed=True)}')
+
+
 @logger.catch
 def main():
     # region Setup
@@ -263,6 +267,10 @@ def main():
         validator,
         MetricsHandler('val', global_step_transform=trainer.global_step),
         Events.EPOCH_COMPLETED
+    )
+    validator.add_event_handler(
+        Events.EPOCH_COMPLETED,
+        log__validation_metrics
     )
     # endregion
 
