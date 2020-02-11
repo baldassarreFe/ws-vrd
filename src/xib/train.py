@@ -25,13 +25,17 @@ from .ignite import Trainer, Validator
 from .ignite import RecallAtBatch, RecallAtEpoch
 from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch
 from .ignite import MetricsHandler, OptimizerParamsHandler, EpochHandler
-from .logging import logger, add_logfile
+from .logging import logger, add_logfile, add_custom_scalars
 
 
 def setup_logging(conf: OmegaConf) -> TensorboardLogger:
     folder = Path(conf.checkpoint.folder).expanduser().resolve() / conf.fullname
+
     add_logfile(folder / 'logs')
+
     tb_logger = TensorboardLogger(folder)
+    add_custom_scalars(tb_logger.writer)
+
     return tb_logger
 
 

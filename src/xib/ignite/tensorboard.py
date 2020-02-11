@@ -61,4 +61,4 @@ class EpochHandler(BaseHandler):
     def __call__(self, engine: Engine, logger: TensorboardLogger, event_name: Events):
         global_step = self.global_step_fn()
         prefix = '{}/'.format(self.tag) if self.tag else ''
-        logger.writer.add_scalar(f'{prefix}/epoch', engine.state.epoch, global_step)
+        logger.writer.add_scalar(f'{prefix}epoch', engine.state.epoch, global_step)
