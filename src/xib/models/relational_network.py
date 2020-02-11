@@ -29,7 +29,8 @@ class RelationalNetwork(nn.Module):
         self.edge_model = edge_model
         self.output_global_model = output_global_model
 
-    def forward(self, graphs: Batch) -> torch.Tensor:
+    def forward(self, graphs: Batch) -> Batch:
+        # Input
         node_features = self.input_node_model(
             linear_features=graphs.node_linear_features,
             conv_features=graphs.node_conv_features
@@ -38,12 +39,14 @@ class RelationalNetwork(nn.Module):
             linear_features=graphs.edge_attr
         )
 
+        # Message passing
         edge_features = self.edge_model(
             nodes=node_features,
             edges=edge_features,
             edge_indices=graphs.edge_index
         )
 
+        # Readout
         global_features = self.output_global_model(
             edges=edge_features,
             edge_indices=graphs.edge_index,
@@ -51,7 +54,9 @@ class RelationalNetwork(nn.Module):
             num_graphs=graphs.num_graphs
         )
 
-        return global_features
+        graphs.predicate_scores = global_features
+
+        return graphs
 
 
 def build_relational_network(conf):

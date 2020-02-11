@@ -30,17 +30,18 @@ rm /tmp/d2.sh
 Preprocess for training with:
 ```bash
 python -m xib.preprocessing.hico_det \
-  --hico-dir=/local_storage/datasets/hico_20160224_det \
+  --hico-dir="data/raw/hico_20160224_det" \
   --skip-existing \
   --confidence-threshold=.3 \
   --nms-threshold=.7 \
-  --detectron-home=~/detectron2 \
-  --output-dir=/local_storage/users/fbaldassarre/hico_20160224_det
+  --detectron-home="${HOME}/detectron2" \
+  --output-dir="data/processed/hico_20160224_det"
 ```
 
 ## Visual Relationship Detection
 - [Visual Relationship Detection](https://cs.stanford.edu/people/ranjaykrishna/vrd/)
-- 5000+ images (same images of [Scene Graphs](https://cs.stanford.edu/~danfei/scene-graph/), download [here](http://imagenet.stanford.edu/internal/jcjohns/scene_graphs/sg_dataset.zip))
+- 5000+ images (same images of [Scene Graphs](https://cs.stanford.edu/~danfei/scene-graph/), 
+  download [here](http://imagenet.stanford.edu/internal/jcjohns/scene_graphs/sg_dataset.zip))
 - Vocabulary
   - 100 subjects
   - 70 predicates

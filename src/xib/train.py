@@ -1,29 +1,28 @@
 import sys
 import textwrap
+from operator import itemgetter
 
-from typing import Callable, Tuple, Any
+from typing import Callable, Tuple, Any, Dict
 from pathlib import Path
 
+import pyaml
 import torch
 import torch.utils.data
 from torch.optim.optimizer import Optimizer
 
-import pyaml
-import torch_geometric
-
-from ignite.engine import Events
-from ignite.handlers import Checkpoint, DiskSaver, EarlyStopping
-from ignite.contrib.handlers import TensorboardLogger, ProgressBar
-from ignite.metrics import Average
+from torch_geometric.data import Batch, DataLoader
 
 from omegaconf import OmegaConf
-from torch_geometric.data import Batch
+
+from ignite.engine import Events
+from ignite.metrics import Average
+from ignite.handlers import Checkpoint, DiskSaver, EarlyStopping
+from ignite.contrib.handlers import TensorboardLogger, ProgressBar
+from ignite.contrib.handlers.tensorboard_logger import OutputHandler
 
 from .utils import import_, random_name
-from .logging import logger, add_logfile, \
-    MetricsHandler, OptimizerParamsHandler, EpochHandler
+from .logging import logger, add_logfile, MetricsHandler, OptimizerParamsHandler, EpochHandler
 from .ignite import Trainer, Validator
-from .ignite import OutputMetricBatch
 from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch
 from .ignite import RecallAtBatch, RecallAtEpoch
 
@@ -54,16 +53,16 @@ def training_step(trainer: Trainer, graphs: Batch):
     graphs = graphs.to(trainer.conf.session.device)
     output = trainer.model(graphs)
 
-    loss = torch.nn.functional.binary_cross_entropy_with_logits(output, graphs.target)
+    loss, loss_dict = criterion(trainer.conf.losses, output, graphs)
 
     trainer.optimizer.zero_grad()
     loss.backward()
     trainer.optimizer.step()
 
     return {
-        'output': output.detach().cpu(),
-        'target': graphs.target.detach().cpu(),
-        'loss': loss.item(),
+        'output': output.predicate_scores.detach().cpu(),
+        'target': graphs.target_bce.detach().cpu(),
+        'losses': loss_dict,
     }
 
 
@@ -71,13 +70,44 @@ def validation_step(validator: Validator, graphs: Batch):
     graphs = graphs.to(validator.conf.session.device)
     output = validator.model(graphs)
 
-    loss = torch.nn.functional.binary_cross_entropy_with_logits(output, graphs.target)
+    _, loss_dict = criterion(validator.conf.losses, output, graphs)
 
     return {
-        'output': output.cpu(),
-        'target': graphs.target.cpu(),
-        'loss': loss.item(),
+        'output': output.predicate_scores.cpu(),
+        'target': graphs.target_bce.cpu(),
+        'losses': loss_dict,
     }
+
+
+def criterion(conf: OmegaConf, results: Batch, targets: Batch) -> Tuple[torch.Tensor, Dict[str, float]]:
+    loss_dict = {}
+    loss_total = torch.tensor(0., device=results.predicate_scores.device)
+
+    if conf['bce']['weight'] > 0:
+        bce = torch.nn.functional.binary_cross_entropy_with_logits(
+            results.predicate_scores,
+            targets.target_bce,
+            reduction='mean'
+        )
+        loss_dict['bce'] = bce
+        loss_total += conf['bce']['weight'] * bce
+
+    if conf['rank']['weight'] > 0:
+        rank = torch.nn.functional.multilabel_margin_loss(
+            results.predicate_scores,
+            targets.target_rank,
+            reduction='mean'
+        )
+        loss_dict['rank'] = rank
+        loss_total += conf['rank']['weight'] * rank
+
+    loss_dict['total'] = loss_total
+    loss_dict = {
+        f'loss/{k}': v.detach().cpu().item()
+        for k, v in loss_dict.items()
+    }
+
+    return loss_total, loss_dict
 
 
 def build_optimizer_and_scheduler(conf: OmegaConf, model: torch.nn.Module) -> Tuple[Optimizer, Any]:
@@ -86,7 +116,7 @@ def build_optimizer_and_scheduler(conf: OmegaConf, model: torch.nn.Module) -> Tu
     optimizer_fn = import_(conf.pop('name'))
     optimizer = optimizer_fn(model.parameters(), **conf)
 
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min')
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=2)
 
     return optimizer, scheduler
 
@@ -95,15 +125,15 @@ def build_dataloaders(conf):
     dataset_class = import_(conf.dataset.name)
 
     if 'trainval' in conf.dataset and 'split' in conf.dataset:
-        dataset = dataset_class(conf.dataset.trainval.folder)
+        dataset = dataset_class(**conf.dataset.trainval)
         if conf.dataset.eager:
             dataset.load_eager()
         train_split = int(conf.dataset.split * len(dataset))
         val_split = len(dataset) - train_split
         train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_split, val_split])
     elif 'train' in conf.dataset and 'val' in conf.dataset:
-        train_dataset = dataset_class(conf.dataset.train.folder)
-        val_dataset = dataset_class(conf.dataset.val.folder)
+        train_dataset = dataset_class(**conf.dataset.train)
+        val_dataset = dataset_class(**conf.dataset.val)
         if conf.dataset.eager:
             train_dataset.load_eager()
             val_dataset.load_eager()
@@ -114,7 +144,7 @@ def build_dataloaders(conf):
                 f'{len(train_dataset) / (len(train_dataset) + len(val_dataset)):.1%}/'
                 f'{len(val_dataset) / (len(train_dataset) + len(val_dataset)):.1%}')
 
-    train_dataloader = torch_geometric.data.DataLoader(
+    train_dataloader = DataLoader(
         train_dataset,
         batch_size=conf.dataloader.batch_size,
         shuffle=True,
@@ -123,7 +153,7 @@ def build_dataloaders(conf):
         drop_last=True
     )
 
-    val_dataloader = torch_geometric.data.DataLoader(
+    val_dataloader = DataLoader(
         val_dataset,
         batch_size=conf.dataloader.batch_size,
         shuffle=True,
@@ -133,22 +163,6 @@ def build_dataloaders(conf):
     )
 
     return train_dataloader, val_dataloader
-
-
-def build_val_dataloader(conf):
-    dataset_class = import_(conf.dataset.name)
-    dataset = dataset_class(**conf.dataset.train)
-
-    dataloader = torch_geometric.data.DataLoader(
-        dataset,
-        batch_size=conf.dataloader.batch_size,
-        shuffle=True,
-        num_workers=conf.dataloader.num_workers,
-        pin_memory=False,
-        drop_last=True
-    )
-
-    return dataloader
 
 
 def build_model(conf: OmegaConf) -> torch.nn.Module:
@@ -184,35 +198,34 @@ def main():
     # endregion
 
     # region Training callbacks
-    OutputMetricBatch(output_transform=lambda o: o['loss']).attach(trainer, 'loss')
-    MeanAveragePrecisionBatch(output_transform=lambda o: (o['target'], o['output'])).attach(trainer, 'mAP')
-    RecallAtBatch(output_transform=lambda o: (o['target'], o['output'])).attach(trainer, 'recall_at')
+    tb_logger.attach(
+        trainer,
+        OptimizerParamsHandler(trainer.optimizer, param_name='lr', tag='z', global_step_transform=trainer.global_step),
+        Events.EPOCH_STARTED
+    )
 
-    # Step the learning rate scheduler at the end of every epoch
+    MeanAveragePrecisionBatch(output_transform=itemgetter('target', 'output')).attach(trainer, 'mAP')
+    RecallAtBatch(output_transform=itemgetter('target', 'output')).attach(trainer, 'recall_at')
+
+    ProgressBar(persist=True, desc='Train').attach(trainer, metric_names='all', output_transform=itemgetter('losses'))
+
+    tb_logger.attach(
+        trainer,
+        OutputHandler('train', output_transform=itemgetter('losses'), global_step_transform=trainer.global_step),
+        Events.ITERATION_COMPLETED
+    )
+    tb_logger.attach(
+        trainer,
+        MetricsHandler('train', global_step_transform=trainer.global_step),
+        Events.ITERATION_COMPLETED
+    )
+
+    tb_logger.attach(
+        trainer,
+        EpochHandler(trainer, tag='z', global_step_transform=trainer.global_step),
+        Events.EPOCH_COMPLETED
+    )
     trainer.add_event_handler(
-        Events.EPOCH_COMPLETED,
-        lambda train_engine: scheduler.step(train_engine.state.metrics['loss'])
-    )
-
-    # Attach loggers after all metrics
-    ProgressBar(persist=True, desc='Train').attach(trainer, metric_names='all')
-    tb_logger.attach(
-        trainer,
-        EpochHandler(trainer, trainer.global_step),
-        Events.EPOCH_COMPLETED
-    )
-    tb_logger.attach(
-        trainer,
-        OptimizerParamsHandler(trainer.optimizer, trainer.global_step, param_name='lr', tag='z'),
-        Events.EPOCH_COMPLETED
-    )
-    tb_logger.attach(
-        trainer,
-        MetricsHandler('train', trainer.global_step),
-        Events.EPOCH_COMPLETED
-    )
-
-    trainer.add_event_handler(  # Or validator.add_event_handler?
         Events.EPOCH_COMPLETED(every=conf.checkpoint.every),
         Checkpoint(
             {
@@ -230,18 +243,30 @@ def main():
     # endregion
 
     # region Validation callbacks
-    Average(output_transform=lambda o: o['loss']).attach(validator, 'loss')
-    MeanAveragePrecisionEpoch(output_transform=lambda o: (o['target'], o['output'])).attach(validator, 'mAP')
-    RecallAtEpoch(output_transform=lambda o: (o['target'], o['output'])).attach(validator, 'recall_at')
+    if conf.losses['bce']['weight'] > 0:
+        Average(output_transform=lambda o: o['losses']['loss/bce']).attach(validator, 'loss/bce')
+    if conf.losses['rank']['weight'] > 0:
+        Average(output_transform=lambda o: o['losses']['loss/rank']).attach(validator, 'loss/rank')
+    Average(output_transform=lambda o: o['losses']['loss/total']).attach(validator, 'loss/total')
+    MeanAveragePrecisionEpoch(output_transform=itemgetter('target', 'output')).attach(validator, 'mAP')
+    RecallAtEpoch(output_transform=itemgetter('target', 'output')).attach(validator, 'recall_at')
+
+    ProgressBar(persist=True, desc='Val').attach(validator, metric_names='all', output_transform=itemgetter('losses'))
+
+    validator.add_event_handler(
+        Events.EPOCH_COMPLETED,
+        lambda val_engine: scheduler.step(val_engine.state.metrics['loss/total'])
+    )
     validator.add_event_handler(Events.COMPLETED, EarlyStopping(
         patience=10,
-        score_function=lambda val_engine: - val_engine.state.metrics['loss'],
+        score_function=lambda val_engine: - val_engine.state.metrics['loss/total'],
         trainer=trainer
     ))
-
-    # Attach loggers after all metrics
-    tb_logger.attach(validator, MetricsHandler('val', trainer.global_step), Events.EPOCH_COMPLETED)
-    ProgressBar(persist=True, desc='Val').attach(validator, metric_names='all')
+    tb_logger.attach(
+        validator,
+        MetricsHandler('val', global_step_transform=trainer.global_step),
+        Events.EPOCH_COMPLETED
+    )
     # endregion
 
     # Log configuration before starting

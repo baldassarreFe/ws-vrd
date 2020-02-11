@@ -118,3 +118,7 @@ class VisualRelations(object):
     def __iter__(self) -> Iterator[VisualRelations]:
         for i in range(len(self)):
             yield self[i]
+
+    def __str__(self):
+        fields = ', '.join(k for k, v in self._iter_fields())
+        return f'{self.__class__.__name__}({len(self)}, [{fields}])'

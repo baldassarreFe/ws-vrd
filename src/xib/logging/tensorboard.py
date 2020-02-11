@@ -10,9 +10,9 @@ from ..ignite import CustomEngine
 class MetricsHandler(BaseHandler):
     """Handle all metrics, figures, images, and text saved in the state of an engine"""
 
-    def __init__(self, tag: str, global_step_fn):
+    def __init__(self, tag: str, global_step_transform):
         self.tag = tag
-        self.global_step_fn = global_step_fn
+        self.global_step_fn = global_step_transform
 
     def __call__(self, engine: CustomEngine, logger: TensorboardLogger, event_name: Events):
         global_step = self.global_step_fn()
@@ -31,9 +31,9 @@ class MetricsHandler(BaseHandler):
 
 
 class OptimizerParamsHandler(_OptimizerParamsHandler):
-    def __init__(self, optimizer: Optimizer, global_step_fn, param_name='lr', tag=None):
+    def __init__(self, optimizer: Optimizer, global_step_transform, param_name='lr', tag=None):
         super(OptimizerParamsHandler, self).__init__(optimizer, param_name, tag)
-        self.global_step_fn = global_step_fn
+        self.global_step_fn = global_step_transform
 
     def __call__(self, engine: Engine, logger: TensorboardLogger, event_name: Events):
         if not isinstance(logger, TensorboardLogger):
@@ -52,9 +52,12 @@ class OptimizerParamsHandler(_OptimizerParamsHandler):
 
 
 class EpochHandler(BaseHandler):
-    def __init__(self, engine: Engine, global_step_fn):
+    def __init__(self, engine: Engine, global_step_transform, tag=None):
+        self.tag = tag
         self.engine = engine
-        self.global_step_fn = global_step_fn
+        self.global_step_fn = global_step_transform
 
     def __call__(self, engine: Engine, logger: TensorboardLogger, event_name: Events):
-        logger.writer.add_scalar('z/epoch', engine.state.epoch, self.global_step_fn())
+        global_step = self.global_step_fn()
+        prefix = '{}/'.format(self.tag) if self.tag else ''
+        logger.writer.add_scalar(f'{prefix}/epoch', engine.state.epoch, global_step)

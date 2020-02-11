@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
-from numbers import Number
-from typing import List, Union, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict
 
 import torch
 import numpy as np
@@ -14,10 +13,14 @@ class NoInputMetric(Metric, ABC):
     """A metric that does not require an input to be computed"""
 
     def __init__(self):
-        super(NoInputMetric, self).__init__(output_transform=lambda x: None)
+        super(NoInputMetric, self).__init__(output_transform=NoInputMetric._do_nothing)
 
     @abstractmethod
     def update(self, _: None):
+        pass
+
+    @staticmethod
+    def _do_nothing(*_, **__):
         pass
 
 
@@ -59,20 +62,6 @@ class BatchMetric(Metric, ABC):
             engine.add_event_handler(Events.ITERATION_COMPLETED, self.iteration_completed)
         # Copy metric to engine.state.metrics after every iteration
         engine.add_event_handler(Events.ITERATION_COMPLETED, self.completed, name)
-
-
-class OutputMetricBatch(BatchMetric):
-    """At every iteration, take a simple value from the output and save it as a metric in the engine state."""
-    value: Union[Number, torch.Tensor, None]
-
-    def reset(self):
-        self.value = None
-
-    def update(self, output):
-        self.value = output
-
-    def compute(self):
-        return self.value
 
 
 def mean_average_precision(annotations, scores):

@@ -3,15 +3,17 @@ comment: default config
 tags:
   - default
 
-fullname: ${randomname:}
+fullname: lbce${losses.bce.weight}_lrank${losses.rank.weight}_lwd${optimizer.weight_decay}_${randomname:}
 
 dataset:
   name: xib.datasets.HicoDet
   split: .75
   eager: yes
   trainval:
-    folder: data/hico_20160224_det/train
+    folder: data/processed/hico_20160224_det/train
+    input_mode: GT
 
+# TODO probably this field is not needed
 input: {}
 
 dataloader:
@@ -20,10 +22,15 @@ dataloader:
 
 optimizer:
   name: torch.optim.Adam
+  weight_decay: 1.0e-05
 
 scheduler: {}
 
-loss: {}
+losses:
+  rank:
+    weight: 0.
+  bce:
+    weight: 1.
 
 checkpoint:
   every: 1
