@@ -31,16 +31,17 @@ class HicoDetSample(object):
         if not isinstance(self.img_size, ImageSize):
             self.img_size = ImageSize(*self.img_size)
 
-    def load_image(self, img_dir):
+    @staticmethod
+    def load_image(filename, img_dir):
         import cv2
-        image = cv2.imread(img_dir.expanduser().joinpath(self.filename).resolve().as_posix())
+        image = cv2.imread(img_dir.expanduser().joinpath(filename).resolve().as_posix())
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         return image
 
     def show_instances(self, img_dir: Path):
         import matplotlib.pyplot as plt
 
-        image = self.load_image(img_dir)
+        image = self.load_image(self.filename, img_dir)
 
         instances = {}
         if self.gt_instances is not None:

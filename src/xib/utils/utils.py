@@ -5,6 +5,14 @@ import torch
 import numpy as np
 
 
+def noop(*_, **__):
+    pass
+
+
+def identity(*args):
+    return args
+
+
 def flatten_dict(input: Mapping, prefix: Sequence = ()) -> Generator[Tuple[Tuple, Any], None, None]:
     """Flatten a dictionary into a sequence of (tuple_key, value) tuples
 

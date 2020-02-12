@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Union, Iterator, Callable
 
+import cv2
 import torch
 import numpy as np
 import sklearn.metrics
@@ -10,9 +11,9 @@ import matplotlib.pyplot as plt
 from ignite.engine import Events, Engine
 from ignite.metrics import Metric
 from tensorboardX import SummaryWriter
-from torch_geometric.data import Batch
 
-from ..datasets.hico_det import HicoDet, HicoDetSample
+from xib.structures import ImageSize
+from ..datasets.hico_det import HicoDet
 
 
 class NoInputMetric(Metric, ABC):
@@ -293,20 +294,22 @@ class PredictImages(object):
         self.global_step_fn = global_step_fn
 
     def __call__(self, engine: Engine):
-        samples: List[HicoDetSample] = engine.state.batch[1]
+        filenames: List[str] = engine.state.batch[1]
         preds = engine.state.output['output'].sigmoid()
         targets = engine.state.output['target']
 
         fig, axes = plt.subplots(*self.grid, figsize=(16, 12), dpi=50)
         axes_iter: Iterator[plt.Axes] = axes.flat
 
-        for target, pred, sample, ax in zip(targets, preds, samples, axes_iter):
-            image = sample.load_image(img_dir=self.img_dir)
+        for target, pred, filename, ax in zip(targets, preds, filenames, axes_iter):
+            image = cv2.imread(self.img_dir.joinpath(filename).as_posix())
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            img_size = ImageSize(*image.shape[:2])
 
             ax.imshow(image)
-            ax.set_title(f'{sample.filename} {sample.img_size}')
+            ax.set_title(f'{filename} ({img_size.height}x{img_size.width})')
 
-            target_str = HicoDet.predicate_id_to_name(sample.gt_visual_relations.predicate_classes.unique(sorted=True))
+            target_str = HicoDet.predicate_id_to_name(target.nonzero().flatten())
             ax.text(
                 0.05, 0.95,
                 '\n'.join(target_str),
@@ -329,8 +332,8 @@ class PredictImages(object):
 
             ax.tick_params(which='both', **{k: False for k in ('bottom', 'top', 'left', 'right',
                                                                'labelbottom', 'labeltop', 'labelleft', 'labelright')})
-            ax.set_xlim(0, sample.img_size.width)
-            ax.set_ylim(sample.img_size.height, 0)
+            ax.set_xlim(0, img_size.width)
+            ax.set_ylim(img_size.height, 0)
 
         fig.tight_layout()
 

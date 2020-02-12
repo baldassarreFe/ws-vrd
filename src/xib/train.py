@@ -3,7 +3,7 @@ import socket
 import textwrap
 from operator import itemgetter
 
-from typing import Callable, Tuple, Any, Dict
+from typing import Callable, Tuple, Any, Dict, Sequence
 from pathlib import Path
 
 import pyaml
@@ -22,6 +22,7 @@ from ignite.handlers import Checkpoint, DiskSaver, EarlyStopping
 from ignite.contrib.handlers import TensorboardLogger, ProgressBar
 from ignite.contrib.handlers.tensorboard_logger import OutputHandler
 
+from xib.utils import noop
 from .utils import import_
 from .config import parse_args
 from .ignite import PredictImages
@@ -49,7 +50,7 @@ def setup_logging(conf: OmegaConf) -> TensorboardLogger:
     return tb_logger
 
 
-def training_step(trainer: Trainer, batch: Tuple[Batch, Any]):
+def training_step(trainer: Trainer, batch: Tuple[Batch, Sequence[str]]):
     graphs = batch[0].to(trainer.conf.session.device)
     output = trainer.model(graphs)
 
@@ -66,7 +67,7 @@ def training_step(trainer: Trainer, batch: Tuple[Batch, Any]):
     }
 
 
-def validation_step(validator: Validator, batch: Tuple[Batch, Any]):
+def validation_step(validator: Validator, batch: Tuple[Batch, Sequence[str]]):
     graphs = batch[0].to(validator.conf.session.device)
     output = validator.model(graphs)
 
@@ -130,7 +131,8 @@ def build_dataloaders(conf) -> Tuple[DataLoader, DataLoader, Callable[[], None]]
         val_split = len(dataset) - train_split
         train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_split, val_split])
 
-        eager_op = dataset.load_eager
+        def eager_op():
+            dataset.load_eager()
     elif 'train' in conf.dataset and 'val' in conf.dataset:
         train_dataset = dataset_class(**conf.dataset.train)
         val_dataset = dataset_class(**conf.dataset.val)
@@ -141,19 +143,17 @@ def build_dataloaders(conf) -> Tuple[DataLoader, DataLoader, Callable[[], None]]
     else:
         raise ValueError(f'Invalid data specification:\n{conf.dataset.pretty()}')
 
-    logger.info(f'Train/Val split: {len(train_dataset)}/{len(val_dataset)} '
-                f'{len(train_dataset) / (len(train_dataset) + len(val_dataset)):.1%}/'
-                f'{len(val_dataset) / (len(train_dataset) + len(val_dataset)):.1%}')
+    logger.info(f'Data split: {len(train_dataset)} train, {len(val_dataset)} val ('
+                f'{100 * len(train_dataset) / (len(train_dataset) + len(val_dataset)):.1f}/'
+                f'{100 * len(val_dataset) / (len(train_dataset) + len(val_dataset)):.1f}%)')
 
     if not conf.dataset.eager:
-        def eager_op():
-            pass
+        eager_op = noop
 
     def collate_fn(batch):
-        return (
-            Batch.from_data_list([graph for graph, _ in batch]),
-            [sample for _, sample in batch]
-        )
+        graphs = Batch.from_data_list([graph for graph, _ in batch])
+        filenames = [sample.filename for _, sample in batch]
+        return graphs, filenames
 
     train_dataloader = DataLoader(
         train_dataset,
@@ -193,6 +193,8 @@ def main():
     # region Setup
     conf = parse_args()
     tb_logger = setup_logging(conf)
+    logger.info('Parsed configuration:\n' +
+                pyaml.dump(OmegaConf.to_container(conf), safe=True, sort_dicts=False, force_embed=True))
 
     trainer = Trainer(training_step, conf)
     validator = Validator(validation_step, conf)
@@ -299,15 +301,15 @@ def main():
     )
     # endregion
 
-    # Log configuration before starting
-    yaml = pyaml.dump(OmegaConf.to_container(conf), safe=True, sort_dicts=False, force_embed=True)
-    logger.info('\n' + yaml)
+    # Log effective configuration before starting
     global_step = trainer.global_step() if 'resume' in conf else 0
+    yaml = pyaml.dump(OmegaConf.to_container(conf), safe=True, sort_dicts=False, force_embed=True)
     tb_logger.writer.add_text('Configuration', textwrap.indent(yaml, '    '), global_step)
     add_session_start(tb_logger.writer, conf.hparams)
     tb_logger.writer.flush()
     p = Path(conf.checkpoint.folder).expanduser() / conf.fullname / f'conf.{global_step}.yaml'
     with p.open(mode='w') as f:
+        f.write(f'# Effective configuration at global step {global_step}\n')
         f.write(yaml)
 
     # If requested, load datasets eagerly
