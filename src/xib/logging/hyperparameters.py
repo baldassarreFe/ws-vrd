@@ -189,8 +189,8 @@ def add_hparam_summary(writer: SummaryWriter, hparams: OmegaConf):
             'dataset_type': 'validation',
         },
         {
-            'tag': 'val/recall_at_10',
-            'display_name': 'R@10',
+            'tag': 'val/recall_at_5',
+            'display_name': 'R@5',
             'dataset_type': 'validation',
         },
     ]

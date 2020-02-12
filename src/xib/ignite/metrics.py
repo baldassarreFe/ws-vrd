@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+from abc import ABC
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Union, Iterator, Callable
 
@@ -188,7 +188,7 @@ class RecallAtBatch(BatchMetric):
     """Recall@x over the output of the last batch"""
     _recall_at: Dict[int, Optional[float]]
 
-    def __init__(self, sizes: Tuple[int] = (10, 30, 50), output_transform=lambda x: x, device=None):
+    def __init__(self, sizes: Tuple[int, ...] = (10, 30, 50), output_transform=lambda x: x, device=None):
         self._sorted_sizes = list(sorted(sizes))
         super(RecallAtBatch, self).__init__(output_transform, device)
 
@@ -213,7 +213,7 @@ class RecallAtEpoch(Metric):
     _y_true: List[torch.Tensor]
     _y_score: List[torch.Tensor]
 
-    def __init__(self, sizes: Tuple[int] = (10, 30, 50), output_transform=lambda x: x, device=None):
+    def __init__(self, sizes: Tuple[int, ...] = (10, 30, 50), output_transform=lambda x: x, device=None):
         self._sorted_sizes = list(sorted(sizes))
         super(RecallAtEpoch, self).__init__(output_transform, device)
 

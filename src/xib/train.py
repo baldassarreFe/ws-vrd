@@ -16,7 +16,7 @@ from torch_geometric.data import Batch
 
 from omegaconf import OmegaConf
 
-from ignite.engine import Events
+from ignite.engine import Engine, Events
 from ignite.metrics import Average
 from ignite.handlers import Checkpoint, DiskSaver, EarlyStopping
 from ignite.contrib.handlers import TensorboardLogger, ProgressBar
@@ -188,8 +188,9 @@ def build_model(conf: OmegaConf) -> torch.nn.Module:
     return model
 
 
-def log_validation_metrics(validator: Validator):
-    logger.info(f'\n{pyaml.dump(validator.state.metrics, safe=True, sort_dicts=False, force_embed=True)}')
+def log_metrics(engine: Engine, tag: str):
+    yaml = pyaml.dump(engine.state.metrics, safe=True, sort_dicts=True, force_embed=True)
+    logger.info(f'{tag}\n{yaml}')
 
 
 @logger.catch(reraise=True)
@@ -228,7 +229,7 @@ def main():
     )
 
     MeanAveragePrecisionBatch(output_transform=itemgetter('target', 'output')).attach(trainer, 'mAP')
-    RecallAtBatch(output_transform=itemgetter('target', 'output')).attach(trainer, 'recall_at')
+    RecallAtBatch(output_transform=itemgetter('target', 'output'), sizes=(5, 10)).attach(trainer, 'recall_at')
 
     ProgressBar(persist=True, desc='Train').attach(trainer, metric_names='all', output_transform=itemgetter('losses'))
 
@@ -243,6 +244,11 @@ def main():
         Events.ITERATION_COMPLETED
     )
 
+    trainer.add_event_handler(
+        Events.EPOCH_COMPLETED,
+        log_metrics,
+        'train'
+    )
     trainer.add_event_handler(
         Events.EPOCH_COMPLETED,
         PredictImages(grid=(2, 3), img_dir=conf.dataset.image_dir, tag='train',
@@ -265,7 +271,7 @@ def main():
         Average(output_transform=lambda o: o['losses']['loss/rank']).attach(validator, 'loss/rank')
     Average(output_transform=lambda o: o['losses']['loss/total']).attach(validator, 'loss/total')
     MeanAveragePrecisionEpoch(output_transform=itemgetter('target', 'output')).attach(validator, 'mAP')
-    RecallAtEpoch(output_transform=itemgetter('target', 'output')).attach(validator, 'recall_at')
+    RecallAtEpoch(output_transform=itemgetter('target', 'output'), sizes=(5, 10)).attach(validator, 'recall_at')
 
     ProgressBar(persist=True, desc='Val').attach(validator, metric_names='all', output_transform=itemgetter('losses'))
 
@@ -280,7 +286,8 @@ def main():
     )
     validator.add_event_handler(
         Events.EPOCH_COMPLETED,
-        log_validation_metrics
+        log_metrics,
+        'val'
     )
     validator.add_event_handler(
         Events.EPOCH_COMPLETED,
@@ -297,8 +304,8 @@ def main():
         Checkpoint(
             {'model': trainer.model, 'optimizer': trainer.optimizer, 'scheduler': scheduler, 'trainer': trainer},
             DiskSaver(Path(conf.checkpoint.folder).expanduser().resolve() / conf.fullname),
-            score_function=lambda val_engine: val_engine.state.metrics['recall_at_10'],
-            score_name='recall_at_10',
+            score_function=lambda val_engine: val_engine.state.metrics['recall_at_5'],
+            score_name='recall_at_5',
             n_saved=conf.checkpoint.keep,
             global_step_transform=trainer.global_step
         )
