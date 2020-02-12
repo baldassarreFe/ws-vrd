@@ -10,6 +10,7 @@ from pathlib import Path
 _default_filter = {
     'ignite': 'INFO',
     'matplotlib': 'WARNING',
+    'PIL': 'WARNING',
     '': True,
 }
 

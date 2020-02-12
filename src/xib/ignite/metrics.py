@@ -285,15 +285,36 @@ class PredictImages(object):
             img_dir: Union[str, Path],
             tag: str,
             logger: SummaryWriter,
-            global_step_fn: Callable[[], int]
+            global_step_fn: Callable[[], int],
+            save_dir: Optional[Union[str, Path]] = None,
     ):
-        self.grid = grid
-        self.img_dir = Path(img_dir).expanduser().resolve()
+        """
+
+        Args:
+            grid:
+            img_dir: directory where the images will be opened from
+            tag:
+            logger: tensorboard logger for the images
+            global_step_fn:
+            save_dir: optional destination for .jpg images
+        """
         self.tag = tag
+        self.grid = grid
         self.logger = logger
         self.global_step_fn = global_step_fn
 
+        self.img_dir = Path(img_dir).expanduser().resolve()
+        if not self.img_dir.is_dir():
+            raise ValueError(f'Image dir must exist: {self.img_dir}')
+
+        self.save_dir = save_dir
+        if self.save_dir is not None:
+            self.save_dir = Path(self.logger.logdir).expanduser().resolve()
+            self.save_dir.mkdir(parents=True, exist_ok=True)
+
     def __call__(self, engine: Engine):
+        global_step = self.global_step_fn()
+
         filenames: List[str] = engine.state.batch[1]
         preds = engine.state.output['output'].sigmoid()
         targets = engine.state.output['target']
@@ -306,8 +327,11 @@ class PredictImages(object):
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             img_size = ImageSize(*image.shape[:2])
 
+            recall_at_5 = recall_at(target[None, :], pred[None, :], (5,))[5]
+            mAP = mean_average_precision(target[None, :], pred[None, :])
+
             ax.imshow(image)
-            ax.set_title(f'{filename} ({img_size.height}x{img_size.width})')
+            ax.set_title(f'{filename[:-4]} mAP {mAP:.1%} R@5 {recall_at_5:.1%}')
 
             target_str = HicoDet.predicate_id_to_name(target.nonzero().flatten())
             ax.text(
@@ -337,4 +361,15 @@ class PredictImages(object):
 
         fig.tight_layout()
 
-        self.logger.add_figure(f'{self.tag}', fig, self.global_step_fn(), close=True)
+        if self.save_dir is not None:
+            import io
+            from PIL import Image
+            with io.BytesIO() as buff:
+                fig.savefig(buff, format='png', facecolor='white', bbox_inches='tight', dpi=50)
+                pil_img = Image.open(buff).convert('RGB')
+                plt.close(fig)
+            save_path = self.save_dir.joinpath(f'{global_step}.{self.tag}.jpg')
+            pil_img.save(save_path, 'JPEG')
+            self.logger.add_image(f'{self.tag}', np.moveaxis(np.asarray(pil_img), 2, 0), global_step=global_step)
+        else:
+            self.logger.add_figure(f'{self.tag}', fig, global_step=global_step, close=True)

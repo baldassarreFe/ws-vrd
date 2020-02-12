@@ -34,8 +34,9 @@ from .logging import logger, add_logfile, add_custom_scalars
 from .logging.hyperparameters import add_hparam_summary, add_session_start, add_session_end
 
 
-def setup_logging(conf: OmegaConf) -> TensorboardLogger:
+def setup_logging(conf: OmegaConf) -> [TensorboardLogger, TensorboardLogger]:
     folder = Path(conf.checkpoint.folder).expanduser().resolve() / conf.fullname
+    folder.mkdir(parents=True, exist_ok=True)
 
     add_logfile(folder / 'logs')
 
@@ -43,11 +44,14 @@ def setup_logging(conf: OmegaConf) -> TensorboardLogger:
     logger.info(f'Host: {socket.gethostname()}')
     logger.info(f'SLURM_JOB_ID: {os.getenv("SLURM_JOB_ID")}')
 
-    tb_logger = TensorboardLogger(folder)
+    # Prepare two loggers, the second one specifically for images, so the first one stays slim
+    tb_logger = TensorboardLogger(logdir=folder)
+    tb_img_logger = TensorboardLogger(logdir=folder, filename_suffix='.images')
+
     add_custom_scalars(tb_logger.writer)
     add_hparam_summary(tb_logger.writer, conf.hparams)
 
-    return tb_logger
+    return tb_logger, tb_img_logger
 
 
 def training_step(trainer: Trainer, batch: Tuple[Batch, Sequence[str]]):
@@ -192,7 +196,7 @@ def log_validation_metrics(validator: Validator):
 def main():
     # region Setup
     conf = parse_args()
-    tb_logger = setup_logging(conf)
+    tb_logger, tb_img_logger = setup_logging(conf)
     logger.info('Parsed configuration:\n' +
                 pyaml.dump(OmegaConf.to_container(conf), safe=True, sort_dicts=False, force_embed=True))
 
@@ -242,7 +246,7 @@ def main():
     trainer.add_event_handler(
         Events.EPOCH_COMPLETED,
         PredictImages(grid=(2, 3), img_dir=conf.dataset.image_dir, tag='train',
-                      logger=tb_logger.writer, global_step_fn=trainer.global_step)
+                      logger=tb_img_logger.writer, global_step_fn=trainer.global_step)
     )
     tb_logger.attach(
         trainer,
@@ -281,7 +285,7 @@ def main():
     validator.add_event_handler(
         Events.EPOCH_COMPLETED,
         PredictImages(grid=(2, 3), img_dir=conf.dataset.image_dir, tag='val',
-                      logger=tb_logger.writer, global_step_fn=trainer.global_step)
+                      logger=tb_img_logger.writer, global_step_fn=trainer.global_step)
     )
     validator.add_event_handler(Events.COMPLETED, EarlyStopping(
         patience=conf.session.early_stopping.patience,
@@ -317,8 +321,10 @@ def main():
 
     # Finally run
     trainer.run(train_dataloader, max_epochs=conf.session.max_epochs, seed=conf.session.seed)
+
     add_session_end(tb_logger.writer, 'SUCCESS')
     tb_logger.close()
+    tb_img_logger.close()
 
 
 if __name__ == '__main__':
