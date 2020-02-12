@@ -21,15 +21,6 @@ class MetricsHandler(BaseHandler):
         for name, value in engine.state.metrics.items():
             logger.writer.add_scalar(f'{self.tag}/{name}', value, global_step)
 
-        # for name, fig in engine.state.figures.items():
-        #     logger.writer.add_figure(f'{self.tag}/{name}', fig, global_step, close=True)
-        #
-        # for name, img in engine.state.images.items():
-        #     logger.writer.add_image(f'{self.tag}/{name}', img, global_step)
-        #
-        # for name, img in engine.state.text.items():
-        #     logger.writer.add_text(f'{self.tag}/{name}', img, global_step)
-
 
 class OptimizerParamsHandler(_OptimizerParamsHandler):
     def __init__(self, optimizer: Optimizer, global_step_transform, param_name='lr', tag=None):
