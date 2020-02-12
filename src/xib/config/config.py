@@ -25,6 +25,9 @@ def summarize_hparams(hparams: OmegaConf):
 
 
 def parse_args():
+    OmegaConf.register_resolver('random_seed', lambda: random.randint(0, 100))
+    OmegaConf.register_resolver('random_name', random_name)
+
     conf = OmegaConf.create()
     for s in sys.argv[1:]:
         if s.endswith('.yaml'):
@@ -34,7 +37,7 @@ def parse_args():
 
     # Make sure everything is resolved
     conf = OmegaConf.create(OmegaConf.to_container(conf, resolve=True))
-
-    conf.fullname = '_'.join((summarize_hparams(conf.hparams), random_name()))
+    if 'fullname' not in conf:
+        conf.fullname = '_'.join((summarize_hparams(conf.hparams), random_name()))
 
     return conf

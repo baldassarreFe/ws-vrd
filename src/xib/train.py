@@ -1,3 +1,5 @@
+import os
+import socket
 import textwrap
 from operator import itemgetter
 
@@ -35,6 +37,10 @@ def setup_logging(conf: OmegaConf) -> TensorboardLogger:
     folder = Path(conf.checkpoint.folder).expanduser().resolve() / conf.fullname
 
     add_logfile(folder / 'logs')
+
+    logger.info(f'PID: {os.getpid()}')
+    logger.info(f'Host: {socket.gethostname()}')
+    logger.info(f'SLURM_JOB_ID: {os.getenv("SLURM_JOB_ID")}')
 
     tb_logger = TensorboardLogger(folder)
     add_custom_scalars(tb_logger.writer)
@@ -162,7 +168,7 @@ def build_dataloaders(conf) -> Tuple[DataLoader, DataLoader, Callable[[], None]]
     val_dataloader = DataLoader(
         val_dataset,
         batch_size=conf.dataloader.batch_size,
-        shuffle=True,
+        shuffle=False,
         num_workers=conf.dataloader.num_workers,
         pin_memory='cuda' in conf.session.device,
         drop_last=True,
@@ -308,7 +314,7 @@ def main():
     load_datasets_eager()
 
     # Finally run
-    trainer.run(train_dataloader, max_epochs=conf.session.max_epochs)
+    trainer.run(train_dataloader, max_epochs=conf.session.max_epochs, seed=conf.session.seed)
     add_session_end(tb_logger.writer, 'SUCCESS')
     tb_logger.close()
 

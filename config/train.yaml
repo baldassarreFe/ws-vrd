@@ -36,6 +36,7 @@ checkpoint:
   folder: ~/experiments/xib/runs
 
 session:
+  seed: ${random_seed:}
   device: cuda
   max_epochs: 35
   early_stopping:
