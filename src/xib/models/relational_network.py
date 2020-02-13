@@ -32,28 +32,29 @@ class RelationalNetwork(nn.Module):
     def forward(self, graphs: Batch) -> Batch:
         # Input
         node_features = self.input_node_model(
-            linear_features=graphs.node_linear_features,
-            conv_features=graphs.node_conv_features
+            linear_features=graphs.input_object_linear_features,
+            conv_features=graphs.input_object_conv_features
         )
         edge_features = self.input_edge_model(
-            linear_features=graphs.edge_attr
+            linear_features=graphs.input_relation_linear_features
         )
 
         # Message passing
         edge_features = self.edge_model(
             nodes=node_features,
             edges=edge_features,
-            edge_indices=graphs.edge_index
+            edge_indices=graphs.input_relation_indexes
         )
 
         # Readout
         global_features = self.output_global_model(
             edges=edge_features,
-            edge_indices=graphs.edge_index,
+            edge_indices=graphs.input_relation_indexes,
             node_to_graph_idx=graphs.batch,
             num_graphs=graphs.num_graphs
         )
 
+        # TODO graphs.predicate_scores = edge_features [E, 117]
         graphs.predicate_scores = global_features
 
         return graphs

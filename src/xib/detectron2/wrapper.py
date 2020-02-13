@@ -139,6 +139,8 @@ class DetectronWrapper(object):
         # Debug utils:
         """
         import matplotlib.pyplot as plt
+        old_backend = plt.get_backend()
+        plt.switch_backend('TkAgg')
         from xib.datasets import HicoDet
         for name, inst in {'detectron': detections, 'other': other_instances}.items():
             for i in range(len(inst)):
@@ -167,6 +169,7 @@ class DetectronWrapper(object):
                 fig.tight_layout()
                 plt.show()
                 plt.close(fig)
+        plt.switch_backend('Agg')
         """
 
         return feature_pyramid, detections, other_instances

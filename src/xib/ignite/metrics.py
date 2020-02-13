@@ -6,14 +6,12 @@ import cv2
 import torch
 import numpy as np
 import sklearn.metrics
-import matplotlib.pyplot as plt
 
 from ignite.engine import Events, Engine
 from ignite.metrics import Metric
 from tensorboardX import SummaryWriter
 
-from xib.structures import ImageSize
-from ..datasets.hico_det import HicoDet
+from ..structures import ImageSize, Vocabulary
 
 
 class BatchMetric(Metric, ABC):
@@ -245,6 +243,7 @@ class PredictImages(object):
             tag: str,
             logger: SummaryWriter,
             global_step_fn: Callable[[], int],
+            predicate_vocabulary: Vocabulary,
             save_dir: Optional[Union[str, Path]] = None,
     ):
         """
@@ -261,6 +260,7 @@ class PredictImages(object):
         self.grid = grid
         self.logger = logger
         self.global_step_fn = global_step_fn
+        self.predicate_vocabulary = predicate_vocabulary
 
         self.img_dir = Path(img_dir).expanduser().resolve()
         if not self.img_dir.is_dir():
@@ -272,16 +272,18 @@ class PredictImages(object):
             self.save_dir.mkdir(parents=True, exist_ok=True)
 
     def __call__(self, engine: Engine):
+        import matplotlib.pyplot as plt
+        plt.switch_backend('Agg')
+
         global_step = self.global_step_fn()
 
-        filenames: List[str] = engine.state.batch[1]
-        preds = engine.state.output['output'].sigmoid()
-        targets = engine.state.output['target']
+        predicate_probs = engine.state.output['output'].sigmoid()
+        targets_bce = engine.state.output['target']
 
         fig, axes = plt.subplots(*self.grid, figsize=(16, 12), dpi=50)
         axes_iter: Iterator[plt.Axes] = axes.flat
 
-        for target, pred, filename, ax in zip(targets, preds, filenames, axes_iter):
+        for target, pred, filename, ax in zip(targets_bce, predicate_probs, engine.state.batch.filenames, axes_iter):
             image = cv2.imread(self.img_dir.joinpath(filename).as_posix())
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             img_size = ImageSize(*image.shape[:2])
@@ -292,7 +294,7 @@ class PredictImages(object):
             ax.imshow(image)
             ax.set_title(f'{filename[:-4]} mAP {mAP:.1%} R@5 {recall_at_5:.1%}')
 
-            target_str = HicoDet.predicate_id_to_name(target.nonzero().flatten())
+            target_str = self.predicate_vocabulary.get_str(target.nonzero().flatten()).tolist()
             ax.text(
                 0.05, 0.95,
                 '\n'.join(target_str),
@@ -303,7 +305,8 @@ class PredictImages(object):
             )
 
             top_5 = torch.argsort(pred, descending=True)[:5]
-            prediction_str = [f'{pred[i]:.1%} {HicoDet.predicates[i]}' for i in top_5]
+            prediction_str = [f'{score:.1%} {str}' for score, str
+                              in zip(pred[top_5], self.predicate_vocabulary.get_str(top_5))]
             ax.text(
                 0.65, 0.95,
                 '\n'.join(prediction_str),

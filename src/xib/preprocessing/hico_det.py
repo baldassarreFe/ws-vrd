@@ -14,7 +14,7 @@ from loguru import logger
 from ..utils import SigIntCatcher
 from ..structures import VisualRelations, ImageSize
 from ..detectron2 import DetectronWrapper, boxes_to_edge_features
-from ..datasets.hico_det import HicoDet, HicoDetSample
+from ..datasets.hico_det import HicoDetSample, OBJECTS, PREDICATES
 
 
 def parse_args():
@@ -201,7 +201,7 @@ class HicoDetMatlabLoader(object):
 
         # Concatenate subject and object instances into a single list of objects
         boxes = Boxes(torch.tensor(subject_boxes + object_boxes))
-        classes = torch.tensor(HicoDet.object_name_to_id(subject_classes + object_classes), dtype=torch.long)
+        classes = torch.tensor(OBJECTS.get_id(subject_classes + object_classes), dtype=torch.long)
 
         # Stack relationship indexes into a 2xM tensor (possibly 2x0),
         # also offset all object indexes since now they appear after all subjects
@@ -227,7 +227,7 @@ class HicoDetMatlabLoader(object):
 
         gt_visual_relations = VisualRelations(
             instances=gt_instances,
-            predicate_classes=torch.tensor(HicoDet.predicate_name_to_id(predicate_classes), dtype=torch.long),
+            predicate_classes=torch.tensor(PREDICATES.get_id(predicate_classes), dtype=torch.long),
             relation_indexes=relation_indexes,
         )
 

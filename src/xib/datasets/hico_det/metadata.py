@@ -1,7 +1,9 @@
 # These are taken to be exactly the same and in the same order as COCO
 # detectron2.data.catalog.MetadataCatalog.get('coco_2017_train').thing_classes
 # except that there is a '_' instead of a ' ', to respect the annotation in the matlab file
-_object_id_to_name = (
+from ...structures import Vocabulary
+
+OBJECTS = Vocabulary((
     'person',
     'bicycle',
     'car',
@@ -82,12 +84,11 @@ _object_id_to_name = (
     'teddy_bear',
     'hair_drier',
     'toothbrush'
-)
-_object_name_to_id = {k: v for v, k in enumerate(_object_id_to_name)}
+), name='objects')
 
 # These are the predicates as they appear in the matlab file.
 # They are sorted alphabetically since the order doesn't matter.
-_predicate_id_to_name = [
+PREDICATES = Vocabulary((
     'adjust',
     'assemble',
     'block',
@@ -205,5 +206,4 @@ _predicate_id_to_name = [
     'wear',
     'wield',
     'zip'
-]
-_predicate_name_to_id = {k: v for v, k in enumerate(_predicate_id_to_name)}
+), name='predicates')

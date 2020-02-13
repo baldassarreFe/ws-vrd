@@ -7,7 +7,7 @@ import torch
 
 from detectron2.structures import Instances
 
-from .metadata import _object_id_to_name
+
 from ...structures import ImageSize, VisualRelations
 
 
@@ -40,6 +40,10 @@ class HicoDetSample(object):
 
     def show_instances(self, img_dir: Path):
         import matplotlib.pyplot as plt
+        old_backend = plt.get_backend()
+        plt.switch_backend('TkAgg')
+
+        from .metadata import OBJECTS
 
         image = self.load_image(self.filename, img_dir)
 
@@ -61,7 +65,7 @@ class HicoDetSample(object):
                 ax.scatter(x0, y0, marker='o', c='r', zorder=1000, label=f'TL ({x0:.0f}, {y0:.0f})')
                 ax.scatter(x1, y1, marker='D', c='r', zorder=1000, label=f'BR ({x1:.0f}, {y1:.0f})')
                 ax.set_title(f'{self.filename} {self.img_size} - '
-                             f'{_object_id_to_name(inst.classes[i])} ({name}: {score:.1%})')
+                             f'{OBJECTS.get_str(inst.classes[i])} ({name}: {score:.1%})')
                 ax.add_patch(plt.Rectangle(
                     (x0, y0),
                     width=x1 - x0,
@@ -76,3 +80,5 @@ class HicoDetSample(object):
                 fig.tight_layout()
                 plt.show()
                 plt.close(fig)
+
+        plt.switch_backend(old_backend)

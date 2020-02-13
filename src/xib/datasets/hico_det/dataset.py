@@ -15,14 +15,11 @@ from loguru import logger
 from torch_geometric.data import Data
 
 from .sample import HicoDetSample
-from .metadata import _object_id_to_name, _object_name_to_id, _predicate_id_to_name, _predicate_name_to_id
-from ...utils import apples_to_apples
+from .metadata import OBJECTS, PREDICATES
+from ...structures.instances import to_data_dict as instance_to_data_dict
 
 
 class HicoDet(torch.utils.data.Dataset):
-    objects: Tuple[str] = tuple(_object_id_to_name)
-    predicates: Tuple[str] = tuple(_predicate_id_to_name)
-
     input_mode: InputMode
 
     class InputMode(Enum):
@@ -54,10 +51,11 @@ class HicoDet(torch.utils.data.Dataset):
 
     def __getitem__(self, item):
         if self.loaded:
-            graph, sample = self.samples[item]
+            graph, filename = self.samples[item]
         else:
             sample = torch.load(self.paths[item])
             graph = self.make_graph(sample)
+            filename = sample.filename
 
         if self.transforms is not None:
             graph = self.transforms(graph)
@@ -67,73 +65,80 @@ class HicoDet(torch.utils.data.Dataset):
             # Batch.from_data_list(...) it will cause a miscount in batch.num_graphs
             logger.warning(f'Loaded graph without nodes for: {graph.filename}')
 
-        return graph, sample
-
-    def make_graph(self, sample: HicoDetSample) -> Data:
-        if self.input_mode is HicoDet.InputMode.GT:
-            instances = sample.gt_instances
-            visual_relations = sample.gt_visual_relations_full
-        elif self.input_mode is HicoDet.InputMode.D2:
-            instances = sample.d2_instances
-            visual_relations = sample.d2_visual_relations_full
-        else:
-            raise ValueError(f'Unknown input mode: {self.input_mode}')
-
-        unique_predicates = torch.unique(sample.gt_visual_relations.predicate_classes, sorted=False)
-        target_bce = torch.zeros(len(HicoDet.predicates), dtype=torch.float)
-        target_bce[unique_predicates] = 1.
-        target_rank = torch.full((len(HicoDet.predicates),), fill_value=-1, dtype=torch.long)
-        target_rank[:len(unique_predicates)] = unique_predicates
-
-        graph = Data(
-            num_nodes=len(instances),
-            node_conv_features=instances.conv_features,
-            node_linear_features=instances.linear_features,
-            edge_index=visual_relations.relation_indexes,
-            edge_attr=visual_relations.linear_features,
-            target_bce=target_bce.unsqueeze_(dim=0),
-            target_rank=target_rank.unsqueeze_(dim=0),
-        )
-
-        return graph
+        # string attributes require separate handling when collating
+        return graph, filename
 
     def load_eager(self):
         if self.loaded:
             return
 
-        vr_count = 0
-        inst_count = 0
-        self.samples = []
+        gt_vr_count = 0
+        gt_inst_count = 0
         start_time = time.perf_counter()
-        for p in tqdm(self.paths, desc='Loading', unit='g'):
-            s = torch.load(p)
-            g = self.make_graph(s)
-            vr_count += g.target_bce.sum().int().item()
-            inst_count += g.num_nodes
-            self.samples.append((g, s))
-        logger.info(f'Loaded '
-                    f'{inst_count:,} {self.input_mode.name.lower()} instances with '
-                    f'{vr_count:,} gt visual relations '
-                    f'from {len(self.paths):,} .pth files '
-                    f'in {time.perf_counter() - start_time:.1f}s')
+        for path in tqdm(self.paths, desc='Loading', unit='g'):
+            sample = self.load_sample(path)
+            graph = self.make_graph(sample)
+            gt_vr_count += graph.num_target_edges
+            gt_inst_count += graph.num_target_nodes
+            self.samples.append((graph, sample.filename))
+
         self.loaded = True
+        logger.info(
+            f'Loaded '
+            f'{gt_inst_count:,} {self.input_mode.name.lower()} instances with '
+            f'{gt_vr_count:,} gt visual relations '
+            f'from {len(self.paths):,} .pth files '
+            f'in {time.perf_counter() - start_time:.1f}s'
+        )
 
-    @classmethod
-    @apples_to_apples
-    def object_id_to_name(cls, ids: Iterable[int]):
-        return [_object_id_to_name[i] for i in ids]
+    @staticmethod
+    def load_sample(path: Path) -> HicoDetSample:
+        sample: HicoDetSample = torch.load(path)
+        sample.gt_visual_relations.predicate_vocabulary = PREDICATES
+        sample.gt_visual_relations.object_vocabulary = OBJECTS
 
-    @classmethod
-    @apples_to_apples
-    def object_name_to_id(cls, names: Iterable[str]):
-        return [_object_name_to_id[n] for n in names]
+        return sample
 
-    @classmethod
-    @apples_to_apples
-    def predicate_id_to_name(cls, ids: Iterable[int]):
-        return [_predicate_id_to_name[i] for i in ids]
+    def make_graph(self, sample: HicoDetSample) -> Data:
+        # region Input: fully connected graph with visual features
+        if self.input_mode is HicoDet.InputMode.GT:
+            input_instances = sample.gt_instances
+            input_relations = sample.gt_visual_relations_full
+        elif self.input_mode is HicoDet.InputMode.D2:
+            input_instances = sample.d2_instances
+            input_relations = sample.d2_visual_relations_full
+        else:
+            raise ValueError(f'Unknown input mode: {self.input_mode}')
 
-    @classmethod
-    @apples_to_apples
-    def predicate_name_to_id(cls, names: Iterable[str]):
-        return [_predicate_name_to_id[n] for n in names]
+        input_graph = {
+            'num_input_nodes': len(input_instances),
+            'num_input_edges': len(input_relations),
+            **instance_to_data_dict(input_instances, prefix='input_object'),
+            **input_relations.to_data_dict(prefix='input')
+        }
+        # endregion
+
+        # region Target: ground-truth relations + encoding of unique predicates
+        unique_predicates = torch.unique(sample.gt_visual_relations.predicate_classes, sorted=False)
+        target_bce = torch.zeros(len(PREDICATES), dtype=torch.float).scatter_(dim=0, index=unique_predicates, value=1.)
+        target_rank = torch.full((len(PREDICATES),), fill_value=-1, dtype=torch.long)
+        target_rank[:len(unique_predicates)] = unique_predicates
+
+        target_graph = {
+            'num_target_nodes': len(sample.gt_instances),
+            'num_target_edges': len(sample.gt_visual_relations),
+            'target_predicate_bce': target_bce[None, :],
+            'target_predicate_rank': target_rank[None, :],
+            **instance_to_data_dict(sample.gt_instances, prefix='target_object'),
+            **sample.gt_visual_relations.to_data_dict(prefix='target'),
+        }
+        # endregion
+
+        graph = Data(
+            # Otherwise collate will raise error
+            num_nodes=input_graph['num_input_nodes'],
+            **input_graph,
+            **target_graph,
+        )
+
+        return graph

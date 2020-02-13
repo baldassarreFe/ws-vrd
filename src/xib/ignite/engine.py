@@ -62,10 +62,12 @@ class Trainer(CustomEngine):
         """Ensure the model is in training mode and that grad computation is enabled"""
         trainer.model.train()
         torch.set_grad_enabled(True)
+        for p in trainer.model.parameters():
+            p.requires_grad_(True)
 
     @staticmethod
     def _increment_samples(trainer: Trainer):
-        graphs: Batch = trainer.state.batch[0]
+        graphs: Batch = trainer.state.batch
         trainer.state.samples += graphs.num_graphs
 
 
@@ -84,10 +86,12 @@ class Validator(CustomEngine):
         self.logger.setLevel(old_level)
 
     @staticmethod
-    def _setup_validation(trainer: Trainer):
+    def _setup_validation(validator: Validator):
         """Ensure the model is in validation mode and that grad computation is disabled"""
-        trainer.model.eval()
-        torch.set_grad_enabled(False)
+        validator.model.eval()
+        torch.set_grad_enabled(True)
+        for p in validator.model.parameters():
+            p.requires_grad_(False)
 
 
 class GpuMaxMemoryAllocated(object):

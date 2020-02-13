@@ -2,6 +2,7 @@ from .boxes import area_intersection, matched_boxlist_union, matched_boxlist_int
 from .instances import clone_instances
 from .relations import VisualRelations
 from .image_size import ImageSize
+from .vocabulary import Vocabulary
 
 __all__ = [
     'area_intersection',
@@ -10,4 +11,5 @@ __all__ = [
     'clone_instances',
     'VisualRelations',
     'ImageSize',
+    'Vocabulary',
 ]

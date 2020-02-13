@@ -3,15 +3,18 @@ import socket
 import textwrap
 from operator import itemgetter
 
-from typing import Callable, Tuple, Any, Dict, Sequence
+from typing import Callable, Tuple, Any, Dict, Sequence, Mapping
 from pathlib import Path
 
 import pyaml
+import numpy as np
+
 import torch
 import torch.utils.data
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset, DataLoader
 from torch.optim.optimizer import Optimizer
 
+import torch_scatter
 from torch_geometric.data import Batch
 
 from omegaconf import OmegaConf
@@ -22,8 +25,7 @@ from ignite.handlers import Checkpoint, DiskSaver, EarlyStopping
 from ignite.contrib.handlers import TensorboardLogger, ProgressBar
 from ignite.contrib.handlers.tensorboard_logger import OutputHandler
 
-from xib.utils import noop
-from .utils import import_
+from .utils import import_, noop
 from .config import parse_args
 from .ignite import PredictImages
 from .ignite import Trainer, Validator
@@ -31,6 +33,8 @@ from .ignite import RecallAtBatch, RecallAtEpoch
 from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch
 from .ignite import MetricsHandler, OptimizerParamsHandler, EpochHandler
 from .logging import logger, add_logfile, add_custom_scalars
+from .datasets import DatasetCatalog
+from .structures import VisualRelations
 from .logging.hyperparameters import add_hparam_summary, add_session_start, add_session_end
 
 
@@ -54,65 +58,174 @@ def setup_logging(conf: OmegaConf) -> [TensorboardLogger, TensorboardLogger]:
     return tb_logger, tb_img_logger
 
 
-def training_step(trainer: Trainer, batch: Tuple[Batch, Sequence[str]]):
-    graphs = batch[0].to(trainer.conf.session.device)
-    output = trainer.model(graphs)
+def training_step(trainer: Trainer, inputs: Batch):
+    inputs = inputs.to(trainer.conf.session.device)
+    outputs = trainer.model(inputs)
 
-    loss, loss_dict = criterion(trainer.conf.losses, output, graphs)
+    loss, loss_dict = trainer.criterion(outputs, inputs)
 
     trainer.optimizer.zero_grad()
     loss.backward()
     trainer.optimizer.step()
 
     return {
-        'output': output.predicate_scores.detach().cpu(),
-        'target': graphs.target_bce.detach().cpu(),
+        'output': outputs.predicate_scores.detach().cpu(),
+        'target': inputs.target_predicate_bce.detach().cpu(),
         'losses': loss_dict,
     }
 
 
-def validation_step(validator: Validator, batch: Tuple[Batch, Sequence[str]]):
-    graphs = batch[0].to(validator.conf.session.device)
-    output = validator.model(graphs)
+def validation_step(validator: Validator, inputs: Batch):
+    inputs = inputs.to(validator.conf.session.device)
+    outputs = validator.model(inputs)
 
-    _, loss_dict = criterion(validator.conf.losses, output, graphs)
+    # # For each graph, try to explain only the TOP_K_PREDICATES
+    # TOP_K_PREDICATES = 5
+    #
+    # # For each graph and predicate to explain, keep only the TOP_X_PAIRS (subject, object) as explanations
+    # TOP_X_PAIRS = 10
+    #
+    # def zero_grad_(tensor:torch.Tensor):
+    #     if tensor.grad is not None:
+    #         tensor.grad.detach_()
+    #         tensor.grad.zero_()
+    #     return tensor
+    #
+    # # Prepare input graphs
+    # inputs = inputs.to(validator.conf.session.device)
+    # num_edges_per_graph = tuple(torch_scatter.scatter_add(
+    #     src=torch.ones(inputs.num_edges, device=validator.conf.session.device, dtype=torch.long),
+    #     index=inputs.batch[inputs.edge_index[0]],
+    #     dim_size=inputs.num_graphs
+    # ).tolist())
+    # edge_offset_per_graph = [0] + torch_scatter.scatter_add(
+    #     src=torch.ones(inputs.num_nodes, device=validator.conf.session.device, dtype=torch.long),
+    #     index=inputs.batch,
+    #     dim_size=inputs.num_graphs
+    # ).tolist()[:-1]
+    # inputs.apply(torch.Tensor.requires_grad_, 'node_linear_features', 'node_conv_features', 'edge_attr')
+    #
+    # # Forward pass to get predicate predictions
+    # output = validator.model(inputs)
+    #
+    # visual_relations = [{
+    #     'relation_indexes': torch.empty((2, 0), dtype=torch.long, device=validator.conf.session.device),
+    #     'predicate_classes': torch.empty((0,), dtype=torch.long, device=validator.conf.session.device),
+    #     'predicate_scores': torch.empty((0,), dtype=torch.float, device=validator.conf.session.device),
+    #     'relation_scores': torch.empty((0,), dtype=torch.float, device=validator.conf.session.device),
+    # } for _ in range(inputs.num_graphs)]
+    #
+    # # Sort predicate predictions per graph and iterate through each one of the TOP_K_PREDICATES predictions
+    # predicate_scores_sorted, predicate_labels_sorted = torch.sort(
+    #     output.predicate_scores.sigmoid(),
+    #     dim=1,
+    #     descending=True
+    # )
+    # predicate_scores_sorted = predicate_scores_sorted[:, :TOP_K_PREDICATES]
+    # predicate_labels_sorted = predicate_labels_sorted[:, :TOP_K_PREDICATES]
+    # for predicate_score, predicate_label in zip(
+    #         predicate_scores_sorted.unbind(dim=1), predicate_labels_sorted.unbind(dim=1)):
+    #     inputs.apply(zero_grad_, 'node_linear_features', 'node_conv_features', 'edge_attr')
+    #
+    #     # Propagate gradient of prediction to outputs, use L1 norm of the gradient as relevance
+    #     predicate_score.backward(torch.ones_like(predicate_score), retain_graph=True)
+    #     relevance_nodes = (
+    #             inputs.node_linear_features.grad.abs().sum(dim=1) +
+    #             inputs.node_conv_features.grad.abs().flatten(start_dim=1).sum(dim=1)
+    #     )
+    #     relevance_edges = inputs.edge_attr.grad.abs().sum(dim=1)
+    #
+    #     # Each (subject, object) pair receives a relevance score that is proportional
+    #     # to the relevance of the subject, the object, and the edge that connects them
+    #     subject_object_scores = (
+    #         relevance_nodes[inputs.edge_index[0]] *
+    #         relevance_edges *
+    #         relevance_nodes[inputs.edge_index[1]]
+    #     )
+    #
+    #     # Now we would like to retain the TOP_X_PAIRS edges, i.e. (subject, object) pairs, whose relevance
+    #     # score w.r.t. to the current predicate_label is highest. Ideally we would do this in a batched fashion,
+    #     # but there is no scatter_sort, so we have to iterate over the edges of each graph and their scores.
+    #     subject_object_scores = torch.split_with_sizes(subject_object_scores, split_sizes=num_edges_per_graph)
+    #     edge_indexes = torch.split_with_sizes(inputs.edge_index, split_sizes=num_edges_per_graph, dim=1)
+    #
+    #     for vr, pred_score, pred_label, edge_scores, edge_index, edge_offset in zip(
+    #             visual_relations, predicate_score.detach(), predicate_label,
+    #             subject_object_scores, edge_indexes, edge_offset_per_graph
+    #     ):
+    #         edge_scores_sorted_index = torch.argsort(edge_scores, descending=True)[:TOP_X_PAIRS]
+    #         so_scores_sorted = edge_scores[edge_scores_sorted_index]
+    #
+    #         vr['relation_scores'] = torch.cat((
+    #             vr['relation_scores'],
+    #             pred_score * so_scores_sorted
+    #         ), dim=0)
+    #         vr['predicate_scores'] = torch.cat((
+    #             vr['predicate_scores'],
+    #             pred_score.repeat(len(so_scores_sorted))
+    #         ), dim=0)
+    #         vr['predicate_classes'] = torch.cat((
+    #             vr['predicate_classes'],
+    #             pred_label.repeat(len(so_scores_sorted))
+    #         ), dim=0)
+    #         vr['relation_indexes'] = torch.cat((
+    #             vr['relation_indexes'],
+    #             edge_index[:, edge_scores_sorted_index] - edge_offset
+    #         ), dim=1)
+    #
+    # # visual_relations = [VisualRelations(**vr) for vr in visual_relations]
+    # visual_relations = [VisualRelations(
+    #     **vr,
+    #     object_vocabulary=DatasetCatalog.get('hico_det')['metadata']['objects'],
+    #     predicate_vocabulary=DatasetCatalog.get('hico_det')['metadata']['predicates']
+    # ) for vr in visual_relations]
+    #
+    # for vr in visual_relations:
+    #     print(*vr.relation_str(), sep='\n', end='\n\n')
+
+    _, loss_dict = validator.criterion(outputs, inputs)
 
     return {
-        'output': output.predicate_scores.cpu(),
-        'target': graphs.target_bce.cpu(),
+        'output': outputs.predicate_scores.detach().cpu(),
+        'target': inputs.target_predicate_bce.detach().cpu(),
         'losses': loss_dict,
     }
 
 
-def criterion(conf: OmegaConf, results: Batch, targets: Batch) -> Tuple[torch.Tensor, Dict[str, float]]:
-    loss_dict = {}
-    loss_total = torch.tensor(0., device=results.predicate_scores.device)
+class Criterion(object):
+    def __init__(self, conf: OmegaConf):
+        self.bce_weight = conf.bce.weight
+        self.rank_weight = conf.rank.weight
 
-    if conf['bce']['weight'] > 0:
-        bce = torch.nn.functional.binary_cross_entropy_with_logits(
-            results.predicate_scores,
-            targets.target_bce,
-            reduction='mean'
-        )
-        loss_dict['bce'] = bce
-        loss_total += conf['bce']['weight'] * bce
+    def __call__(self, results: Batch, targets: Batch) -> Tuple[torch.Tensor, Dict[str, float]]:
+        loss_dict = {}
+        loss_total = torch.tensor(0., device=results.predicate_scores.device)
 
-    if conf['rank']['weight'] > 0:
-        rank = torch.nn.functional.multilabel_margin_loss(
-            results.predicate_scores,
-            targets.target_rank,
-            reduction='mean'
-        )
-        loss_dict['rank'] = rank
-        loss_total += conf['rank']['weight'] * rank
+        if self.bce_weight > 0:
+            bce = torch.nn.functional.binary_cross_entropy_with_logits(
+                results.predicate_scores,
+                targets.target_predicate_bce,
+                reduction='mean'
+            )
+            loss_dict['bce'] = bce
+            loss_total += self.bce_weight * bce
 
-    loss_dict['total'] = loss_total
-    loss_dict = {
-        f'loss/{k}': v.detach().cpu().item()
-        for k, v in loss_dict.items()
-    }
+        if self.rank_weight > 0:
+            rank = torch.nn.functional.multilabel_margin_loss(
+                results.predicate_scores,
+                targets.target_predicate_rank,
+                reduction='mean'
+            )
+            loss_dict['rank'] = rank
+            loss_total += self.rank_weight * rank
 
-    return loss_total, loss_dict
+        loss_dict['total'] = loss_total
+        loss_dict = {
+            f'loss/{k}': v.detach().cpu().item()
+            for k, v in loss_dict.items()
+        }
+
+        return loss_total, loss_dict
 
 
 def build_optimizer_and_scheduler(conf: OmegaConf, model: torch.nn.Module) -> Tuple[Optimizer, Any]:
@@ -126,11 +239,11 @@ def build_optimizer_and_scheduler(conf: OmegaConf, model: torch.nn.Module) -> Tu
     return optimizer, scheduler
 
 
-def build_dataloaders(conf) -> Tuple[DataLoader, DataLoader, Callable[[], None]]:
-    dataset_class = import_(conf.dataset.name)
+def build_datasets(conf) -> Tuple[Dataset, Dataset, Callable[[], None], Mapping[str, Any]]:
+    ds = DatasetCatalog.get(conf.dataset.name)
 
     if 'trainval' in conf.dataset and 'split' in conf.dataset:
-        dataset = dataset_class(**conf.dataset.trainval)
+        dataset = ds['class'](**conf.dataset.trainval)
         train_split = int(conf.dataset.split * len(dataset))
         val_split = len(dataset) - train_split
         train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_split, val_split])
@@ -138,8 +251,8 @@ def build_dataloaders(conf) -> Tuple[DataLoader, DataLoader, Callable[[], None]]
         def eager_op():
             dataset.load_eager()
     elif 'train' in conf.dataset and 'val' in conf.dataset:
-        train_dataset = dataset_class(**conf.dataset.train)
-        val_dataset = dataset_class(**conf.dataset.val)
+        train_dataset = ds['class'](**conf.dataset.train)
+        val_dataset = ds['class'](**conf.dataset.val)
 
         def eager_op():
             train_dataset.load_eager()
@@ -154,10 +267,16 @@ def build_dataloaders(conf) -> Tuple[DataLoader, DataLoader, Callable[[], None]]
     if not conf.dataset.eager:
         eager_op = noop
 
+    return train_dataset, val_dataset, eager_op, ds['metadata']
+
+
+def build_dataloaders(conf, train_dataset: Dataset, val_dataset: Dataset) -> Tuple[DataLoader, DataLoader]:
     def collate_fn(batch):
-        graphs = Batch.from_data_list([graph for graph, _ in batch])
-        filenames = [sample.filename for _, sample in batch]
-        return graphs, filenames
+        # Hacky way to get around torch_geometric not supporting string attributes
+        graphs = Batch.from_data_list([graph for graph, _ in batch], follow_batch=['target_object_boxes'])
+        # TODO check this doesn't cause problems in multiprocessing, maybe do a deepcopy?
+        graphs.filenames = np.array([filename for _, filename in batch])
+        return graphs
 
     train_dataloader = DataLoader(
         train_dataset,
@@ -171,7 +290,9 @@ def build_dataloaders(conf) -> Tuple[DataLoader, DataLoader, Callable[[], None]]
 
     val_dataloader = DataLoader(
         val_dataset,
-        batch_size=conf.dataloader.batch_size,
+        # TODO restore
+        # batch_size=conf.dataloader.batch_size,
+        batch_size=4,
         shuffle=False,
         num_workers=conf.dataloader.num_workers,
         pin_memory='cuda' in conf.session.device,
@@ -179,7 +300,7 @@ def build_dataloaders(conf) -> Tuple[DataLoader, DataLoader, Callable[[], None]]
         collate_fn=collate_fn
     )
 
-    return train_dataloader, val_dataloader, eager_op
+    return train_dataloader, val_dataloader
 
 
 def build_model(conf: OmegaConf) -> torch.nn.Module:
@@ -205,6 +326,7 @@ def main():
     validator = Validator(validation_step, conf)
 
     trainer.model = validator.model = build_model(conf.model).to(conf.session.device)
+    trainer.criterion = validator.criterion = Criterion(conf.losses)
     trainer.optimizer, scheduler = build_optimizer_and_scheduler(conf.optimizer, trainer.model)
 
     if 'resume' in conf:
@@ -218,7 +340,8 @@ def main():
         }, checkpoint=torch.load(checkpoint, map_location=conf.session.device))
         logger.info(f'Resumed from {checkpoint}, epoch {trainer.state.epoch}, samples {trainer.global_step()}')
 
-    train_dataloader, val_dataloader, load_datasets_eager = build_dataloaders(conf)
+    train_dataset, val_dataset, load_datasets_eager, dataset_metadata = build_datasets(conf)
+    train_dataloader, val_dataloader = build_dataloaders(conf, train_dataset, val_dataset)
     # endregion
 
     # region Training callbacks
@@ -252,7 +375,8 @@ def main():
     trainer.add_event_handler(
         Events.EPOCH_COMPLETED,
         PredictImages(grid=(2, 3), img_dir=conf.dataset.image_dir, tag='train',
-                      logger=tb_img_logger.writer, global_step_fn=trainer.global_step)
+                      logger=tb_img_logger.writer, predicate_vocabulary=dataset_metadata['predicates'],
+                      global_step_fn=trainer.global_step)
     )
     tb_logger.attach(
         trainer,
@@ -292,7 +416,8 @@ def main():
     validator.add_event_handler(
         Events.EPOCH_COMPLETED,
         PredictImages(grid=(2, 3), img_dir=conf.dataset.image_dir, tag='val',
-                      logger=tb_img_logger.writer, global_step_fn=trainer.global_step)
+                      logger=tb_img_logger.writer, predicate_vocabulary=dataset_metadata['predicates'],
+                      global_step_fn=trainer.global_step)
     )
     validator.add_event_handler(Events.COMPLETED, EarlyStopping(
         patience=conf.session.early_stopping.patience,
