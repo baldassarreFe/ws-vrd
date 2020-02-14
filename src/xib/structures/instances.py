@@ -38,18 +38,23 @@ def instance_str(instances: Instances, vocabulary: Optional[Vocabulary] = None):
     return [f'({n} {b} {s})' for n, b, s in zip(classes, boxes, scores)]
 
 
-def to_data_dict(instances: Instances, prefix=''):
+def to_data_dict(instances: Instances, prefix=None):
     """Prepare a dict to build a pytorch_geometric.data.Data object"""
-    def key_mapper(key: str) -> str:
-        return '_'.join((prefix, key))
     res = {
-        key_mapper(k): v for k, v in instances.get_fields().items()
-        if k in {'classes', 'scores', 'linear_features', 'conv_features'}
+        k: v
+        for k, v in instances.get_fields().items()
+        if v is not None and k in {
+            'classes', 'scores',
+            'linear_features', 'conv_features'
+        }
     }
     if instances.has('boxes'):
-        res[key_mapper('boxes')] = instances.boxes.tensor  # Nx4
-    res[key_mapper('image_size')] = torch.tensor([instances.image_size])  # 1x2
-    return res
+        res['boxes'] = instances.boxes.tensor  # Nx4
+    res['image_size'] = torch.tensor([instances.image_size])  # 1x2
+    return {
+        f'{prefix}_{k}' if prefix is not None else k: v
+        for k, v in res.items()
+    }
 
 
 def from_data_dict(data_dict: Mapping[str, Any], prefix=None):

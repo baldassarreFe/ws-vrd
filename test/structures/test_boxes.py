@@ -1,7 +1,8 @@
 import torch
 import torch.testing
+from detectron2.structures import Boxes
 
-from xib.structures import Boxes, area_intersection
+from xib.structures import area_intersection
 
 
 def test_area_intersection(device):

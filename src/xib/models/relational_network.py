@@ -29,35 +29,52 @@ class RelationalNetwork(nn.Module):
         self.edge_model = edge_model
         self.output_global_model = output_global_model
 
-    def forward(self, graphs: Batch) -> Batch:
+    def forward(self, inputs: Batch) -> Batch:
         # Input
         node_features = self.input_node_model(
-            linear_features=graphs.input_object_linear_features,
-            conv_features=graphs.input_object_conv_features
+            linear_features=inputs.object_linear_features,
+            conv_features=inputs.object_conv_features
         )
         edge_features = self.input_edge_model(
-            linear_features=graphs.input_relation_linear_features
+            linear_features=inputs.relation_linear_features
         )
 
         # Message passing
         edge_features = self.edge_model(
             nodes=node_features,
             edges=edge_features,
-            edge_indices=graphs.input_relation_indexes
+            edge_indices=inputs.relation_indexes
         )
 
         # Readout
+        # TODO write alternative redout that produces a [E, 117] edge-wise output
+        #      and then simply scatter_max graph-wise without further fully connected layers
         global_features = self.output_global_model(
             edges=edge_features,
-            edge_indices=graphs.input_relation_indexes,
-            node_to_graph_idx=graphs.batch,
-            num_graphs=graphs.num_graphs
+            edge_indices=inputs.relation_indexes,
+            node_to_graph_idx=inputs.batch,
+            num_graphs=inputs.num_graphs
         )
 
-        # TODO graphs.predicate_scores = edge_features [E, 117]
-        graphs.predicate_scores = global_features
+        # Build output batch so that it can be split back into graphs using Batch.to_data_list()
+        keys_to_copy = (
+            'n_edges',
+            'n_nodes',
+            'object_boxes', 'object_classes',
+            'relation_indexes', 'object_image_size'
+        )
+        outputs = Batch(
+            num_nodes=inputs.num_nodes,
+            batch=inputs.batch,
+            predicate_scores=global_features,
+            **{k: inputs[k] for k in keys_to_copy}
+        )
+        outputs.__slices__ = {
+            'predicate_scores': inputs.__slices__['relation_indexes'],
+            **{k: inputs.__slices__[k] for k in keys_to_copy}
+        }
 
-        return graphs
+        return outputs
 
 
 def build_relational_network(conf):

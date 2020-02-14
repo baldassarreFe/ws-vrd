@@ -96,7 +96,7 @@ class VisualRelations(object):
 
     def relation_str(self):
         if self.relation_scores is not None:
-            scores = [f'{s:.1%}' for s in self.relation_scores]
+            scores = [f'{s:f}' for s in self.relation_scores]
         else:
             scores = ['?'] * len(self)
 
@@ -139,21 +139,25 @@ class VisualRelations(object):
     def area_union(self):
         return matched_boxlist_union(self.subject_boxes(), self.object_boxes()).area()
 
-    def to_data_dict(self, prefix=''):
+    def to_data_dict(self, prefix=None):
         """Prepare a dict to build a pytorch_geometric.data.Data object"""
         def key_mapper(key: str) -> str:
             if key.endswith('features'):
                 key = f'relation_{key}'
-            return '_'.join((prefix, key))
+            return f'{prefix}_{key}' if prefix is not None else key
+
         return {
-            key_mapper(k): v for k, v in self.__dict__.items()
-            if k in {'relation_scores', 'relation_indexes',
-                     'predicate_scores', 'predicate_classes',
-                     'conv_features', 'linear_features'}
+            key_mapper(k): v
+            for k, v in self.__dict__.items()
+            if v is not None and k in {
+                'relation_scores', 'relation_indexes',
+                'predicate_scores', 'predicate_classes',
+                'conv_features', 'linear_features'
+            }
         }
 
     @classmethod
-    def from_data_dict(cls, data_dict: Mapping[str, Any], prefix=''):
+    def from_data_dict(cls, data_dict: Mapping[str, Any], prefix=None):
         strip = len(prefix) + 1 if prefix is not None else 0
 
         def key_mapper(key: str) -> str:

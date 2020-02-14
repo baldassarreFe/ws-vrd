@@ -1,6 +1,7 @@
 import torch
+from detectron2.structures import Boxes
 
-from xib.structures import VisualRelations, Boxes
+from xib.structures import VisualRelations
 
 
 def test_constructor(device):

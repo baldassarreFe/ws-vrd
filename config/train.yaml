@@ -12,9 +12,6 @@ dataset:
     folder: data/processed/hico_20160224_det/train
     input_mode: GT
 
-# TODO probably this field is not needed
-input: {}
-
 dataloader:
   batch_size: 64
   num_workers: 1
@@ -42,7 +39,14 @@ session:
   early_stopping:
     patience: 5
 
+visual_relations:
+  mode: FC_MAX
+  top_k_predicates: 5
+  top_x_relations: 50
+
 hparams:
   loss/bce--lbce: ${losses.bce.weight}
   loss/rank--lrank: ${losses.rank.weight}
   opt/weight_decay--wd: ${optimizer.weight_decay}
+  vr/topk--topk: ${visual_relations.top_k_predicates}
+  vr/mode--vrm: ${visual_relations.mode}
