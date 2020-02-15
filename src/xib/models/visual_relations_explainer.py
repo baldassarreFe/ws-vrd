@@ -1,9 +1,8 @@
 from enum import Enum
-from typing import Union, List, Tuple
+from typing import Union
 
 import torch
-import torch_scatter
-from torch_geometric.data import Data, Batch
+from torch_geometric.data import Batch
 
 from ..utils import scatter_topk_2d_flat
 
@@ -22,6 +21,7 @@ class VisualRelationExplainer(torch.nn.Module):
             mode: Union[str, ReadoutMode],
             top_k_predicates: int = 10,
             top_x_relations: int = 100,
+            **__
     ):
         """
 

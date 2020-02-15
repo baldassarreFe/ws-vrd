@@ -27,9 +27,10 @@ from ignite.contrib.handlers.tensorboard_logger import OutputHandler
 
 from .utils import import_, noop
 from .config import parse_args
-from .ignite import PredictPredicatesImg, PredictRelationsImg
+from .ignite import PredicatePredictionLogger
 from .ignite import Trainer, Validator
 from .ignite import RecallAtBatch, RecallAtEpoch
+from .ignite import VisualRelationPredictionLogger, VisualRelationRecallAt
 from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch
 from .ignite import MetricsHandler, OptimizerParamsHandler, EpochHandler
 from .logging import logger, add_logfile, add_custom_scalars
@@ -314,9 +315,9 @@ def main():
     )
     trainer.add_event_handler(
         Events.EPOCH_COMPLETED,
-        PredictPredicatesImg(grid=(2, 3), img_dir=conf.dataset.image_dir, tag='train',
-                             logger=tb_img_logger.writer, predicate_vocabulary=dataset_metadata['predicates'],
-                             global_step_fn=trainer.global_step)
+        PredicatePredictionLogger(grid=(2, 3), img_dir=conf.dataset.image_dir, tag='train',
+                                  logger=tb_img_logger.writer, predicate_vocabulary=dataset_metadata['predicates'],
+                                  global_step_fn=trainer.global_step)
     )
     tb_logger.attach(
         trainer,
@@ -373,9 +374,14 @@ def main():
     )
     predicate_predication_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
-        PredictPredicatesImg(grid=(2, 3), img_dir=conf.dataset.image_dir, tag='val',
-                             logger=tb_img_logger.writer, predicate_vocabulary=dataset_metadata['predicates'],
-                             global_step_fn=trainer.global_step)
+        PredicatePredictionLogger(
+            grid=(2, 3),
+            img_dir=conf.dataset.image_dir,
+            tag='val',
+            logger=tb_img_logger.writer,
+            predicate_vocabulary=dataset_metadata['predicates'],
+            global_step_fn=trainer.global_step
+        )
     )
     predicate_predication_validator.add_event_handler(Events.COMPLETED, EarlyStopping(
         patience=conf.session.early_stopping.patience,
@@ -396,10 +402,18 @@ def main():
     # endregion
 
     # region Relationship detection validation callbacks
-    # MeanAveragePrecisionEpoch(itemgetter('target', 'output')).attach(relationship_prediction_validator, 'mAP')
-    # RecallAtEpoch((5, 10), itemgetter('target', 'output')).attach(relationship_prediction_validator, 'recall_at')
+    relationship_prediction_validator.add_event_handler(
+        Events.ITERATION_COMPLETED,
+        VisualRelationRecallAt(mode=conf.visual_relations.evaluation, steps=(50, 100)),
+    )
+    for step in (50, 100):
+        Average(
+            output_transform=itemgetter(f'recall_at_{step}'),
+            device=conf.session.device
+        ).attach(relationship_prediction_validator, f'recall_at_{step}')
 
-    ProgressBar(persist=True, desc='Relations val').attach(relationship_prediction_validator, metric_names='all')
+    ProgressBar(persist=True, desc='Relations val').attach(
+        relationship_prediction_validator, output_transform=itemgetter(f'recall_at_50'))
 
     tb_logger.attach(
         relationship_prediction_validator,
@@ -414,11 +428,16 @@ def main():
     )
     relationship_prediction_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
-        PredictRelationsImg(grid=(2, 3), img_dir=conf.dataset.image_dir, tag='val_vr', logger=tb_img_logger.writer,
-                            top_x_relations=conf.visual_relations.top_x_relations,
-                            object_vocabulary=dataset_metadata['objects'],
-                            predicate_vocabulary=dataset_metadata['predicates'],
-                            global_step_fn=trainer.global_step)
+        VisualRelationPredictionLogger(
+            grid=(2, 3),
+            img_dir=conf.dataset.image_dir,
+            tag='val_vr',
+            logger=tb_img_logger.writer,
+            top_x_relations=conf.visual_relations.top_x_relations,
+            object_vocabulary=dataset_metadata['objects'],
+            predicate_vocabulary=dataset_metadata['predicates'],
+            global_step_fn=trainer.global_step
+        )
     )
     # endregion
 

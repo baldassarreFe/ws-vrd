@@ -42,7 +42,8 @@ session:
 visual_relations:
   mode: FC_MAX
   top_k_predicates: 5
-  top_x_relations: 50
+  top_x_relations: 100
+  evaluation: PREDICATE_PREDICTION
 
 hparams:
   loss/bce--lbce: ${losses.bce.weight}

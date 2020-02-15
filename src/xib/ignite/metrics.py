@@ -1,5 +1,6 @@
 import textwrap
 from abc import ABC
+from enum import Enum
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Union, Iterator, Callable
 
@@ -7,6 +8,7 @@ import cv2
 import torch
 import numpy as np
 import sklearn.metrics
+from collections import defaultdict
 
 from ignite.engine import Events, Engine
 from ignite.metrics import Metric
@@ -236,7 +238,7 @@ class RecallAtEpoch(Metric):
             engine.state.metrics[f'{name}_{k}'] = v
 
 
-class PredictPredicatesImg(object):
+class PredicatePredictionLogger(object):
     def __init__(
             self,
             grid: Tuple[int, int],
@@ -339,7 +341,7 @@ class PredictPredicatesImg(object):
             self.logger.add_figure(f'{self.tag}', fig, global_step=global_step, close=True)
 
 
-class PredictRelationsImg(object):
+class VisualRelationPredictionLogger(object):
     def __init__(
             self,
             grid: Tuple[int, int],
@@ -391,21 +393,28 @@ class PredictRelationsImg(object):
         targets = engine.state.batch[1]
         filenames = engine.state.batch[2]
 
+        pred_node_offsets = [0] + relations.n_nodes[:-1].cumsum(dim=0).tolist()
         pred_relation_scores = torch.split_with_sizes(relations.relation_scores, relations.n_edges.tolist())
         pred_predicate_scores = torch.split_with_sizes(relations.predicate_scores, relations.n_edges.tolist())
         pred_predicate_classes = torch.split_with_sizes(relations.predicate_classes, relations.n_edges.tolist())
         pred_relation_indexes = torch.split_with_sizes(relations.relation_indexes, relations.n_edges.tolist(), dim=1)
 
+        gt_node_offsets = [0] + targets.n_nodes[:-1].cumsum(dim=0).tolist()
         gt_predicate_classes = torch.split_with_sizes(targets.predicate_classes, targets.n_edges.tolist())
         gt_relation_indexes = torch.split_with_sizes(targets.relation_indexes, targets.n_edges.tolist(), dim=1)
 
         for b in range(min(relations.num_graphs, self.grid[0] * self.grid[1])):
-            buffer = f'{filenames[b]}\n\n'
+            buffer = (
+                f'{filenames[b]}\n'
+                f'- insances {relations.n_nodes[b].item()}\n'
+                f'- (subj, obj) pairs {(relations.n_nodes[b] * (relations.n_nodes[b] - 1)).item()}\n'
+            )
 
             top_x_relations = set()
             count_retrieved = 0
             buffer += f'Top {relations.n_edges[b].item()} relations:\n'
             for i in range(relations.n_edges[b].item()):
+                node_offset = pred_node_offsets[b]
                 score = pred_relation_scores[b][i].item()
 
                 subj_idx = pred_relation_indexes[b][0, i].item()
@@ -424,12 +433,16 @@ class PredictRelationsImg(object):
                 top_x_relations.add((subj_class, subj_idx, predicate_class, obj_idx, obj_class))
                 buffer += (
                     f'{i + 1:3d} {score:.1e} : '
-                    f'({subj_idx:3d}) {subj_str:<14} {predicate_str:^14} {obj_str:>14} ({obj_idx:3d})'
-                    f'   {str(subj_box):<25} {predicate_score:>6.1%} {str(obj_box):>25}\n'
+                    f'({subj_idx - node_offset:3d}) {subj_str:<14} '
+                    f'{predicate_str:^14} '
+                    f'{obj_str:>14} ({obj_idx - node_offset:3d})   '
+                    f'{str(subj_box):<25} {predicate_score:>6.1%} {str(obj_box):>25}\n'
                 )
 
             buffer += f'\nGround-truth relations:\n'
             for j in range(targets.n_edges[b].item()):
+                node_offset = gt_node_offsets[b]
+
                 subj_idx = gt_relation_indexes[b][0, j].item()
                 obj_idx = gt_relation_indexes[b][1, j].item()
                 predicate_class = gt_predicate_classes[b][j].item()
@@ -447,12 +460,14 @@ class PredictRelationsImg(object):
                 if retrieved:
                     count_retrieved += 1
                 buffer += (
-                    f'  {"OK️" if retrieved else "  "}        : '
-                    f'({subj_idx:3d}) {subj_str:<14} {predicate_str:^14} {obj_str:>14} ({obj_idx:3d})'
-                    f'   {str(subj_box):<25}        {str(obj_box):>25}\n'
+                    f'{"  OK️" if retrieved else "    "}        : '
+                    f'({subj_idx - node_offset:3d}) {subj_str:<14} '
+                    f'{predicate_str:^14} '
+                    f'{obj_str:>14} ({obj_idx - node_offset:3d})   '
+                    f'{str(subj_box):<25}        {str(obj_box):>25}\n'
                 )
 
-            buffer += f'\nRecall@{self.top_x_relations}: {count_retrieved/targets.n_edges[b].item():.2%}\n\n'
+            buffer += f'\nRecall@{self.top_x_relations}: {count_retrieved / targets.n_edges[b].item():.2%}\n\n'
 
             text += textwrap.indent(buffer, '    ', lambda line: True) + '---\n\n'
 
@@ -513,3 +528,68 @@ class PredictRelationsImg(object):
         #     self.logger.add_image(f'{self.tag}', np.moveaxis(np.asarray(pil_img), 2, 0), global_step=global_step)
         # else:
         #     self.logger.add_figure(f'{self.tag}', fig, global_step=global_step, close=True)
+
+
+class VisualRelationRecallAt(object):
+
+    class Mode(Enum):
+        PREDICATE_PREDICTION = 0
+        PHRASE_DETECTION = 1
+        RELATIONSHIP_DETECTION = 2
+
+    def __init__(self, mode, steps: Tuple[int, ...]):
+        self.mode = mode
+        self.steps = sorted(steps)
+
+    def __call__(self, engine: Engine):
+        """Compute Recall @ self.steps for the current batch"""
+        relations = engine.state.output['relations']
+        targets = engine.state.batch[1]
+
+        # vr_tuple = (subj_idx, subj_class, predicate_class, obj_idx, obj_class)
+        predicted_relations = defaultdict(list)
+        for graph_idx, vr_tuple in zip(
+                relations.batch[relations.relation_indexes[0]].numpy(), zip(
+                    relations.relation_indexes[0].numpy(),
+                    relations.object_classes[relations.relation_indexes[0]].numpy(),
+                    relations.predicate_classes.numpy(),
+                    relations.relation_indexes[1].numpy(),
+                    relations.object_classes[relations.relation_indexes[1]].numpy(),
+                )
+        ):
+            if len(predicted_relations[graph_idx]) >= self.steps[-1]:
+                # Keep at most max(self.steps) relations per graph
+                continue
+            predicted_relations[graph_idx].append(vr_tuple)
+
+        relevant_items_retrieved_at = {k: torch.zeros_like(targets.n_edges) for k in self.steps}
+        relevant_items = targets.n_edges
+
+        for graph_idx, vr_tuple in zip(
+                targets.batch[targets.relation_indexes[0]].numpy(), zip(
+                    targets.relation_indexes[0].numpy(),
+                    targets.object_classes[targets.relation_indexes[0]].numpy(),
+                    targets.predicate_classes.numpy(),
+                    targets.relation_indexes[1].numpy(),
+                    targets.object_classes[targets.relation_indexes[1]].numpy(),
+                )
+        ):
+            try:
+                found_at = predicted_relations[graph_idx].index(vr_tuple)
+            except ValueError:
+                # Ground-truth relation not found in the retrieved relations, keep going
+                continue
+
+            for k, relevant_items_retrieved in relevant_items_retrieved_at.items():
+                if found_at >= k:
+                    # the relevant_items_retrieved_at dict is ordered, so we can break early
+                    break
+                relevant_items_retrieved[graph_idx] += 1
+
+        recall_per_graph_at = {
+            k: relevant_items_retrieved.float() / relevant_items
+            for k, relevant_items_retrieved in relevant_items_retrieved_at.items()
+        }
+
+        for k, recall_per_graph in recall_per_graph_at.items():
+            engine.state.output[f'recall_at_{k}'] = recall_per_graph.mean().item()

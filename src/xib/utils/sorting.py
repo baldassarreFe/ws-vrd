@@ -31,8 +31,20 @@ def scatter_sort(src: Tensor, index: LongTensor, descending=False, dim_size=None
     return result_values, result_indexes
 
 
-def scatter_topk(src: Tensor, index: LongTensor, k: int, num_chunks=None, fill_value=None) \
+def scatter_topk_1d(src: Tensor, index: LongTensor, k: int, num_chunks=None, fill_value=None) \
         -> Tuple[Tensor, LongTensor, LongTensor]:
+    """
+
+    Args:
+        src:
+        index: must be sorted in ascending order
+        k:
+        num_chunks:
+        fill_value:
+
+    Returns: A 2D tensor of shape [num_chunks, k]
+
+    """
     if src.ndimension() > 1:
         raise ValueError('Only implemented for 1D tensors')
 
@@ -56,6 +68,49 @@ def scatter_topk(src: Tensor, index: LongTensor, k: int, num_chunks=None, fill_v
         result_values[chunk_idx, :len(values)] = values
         result_indexes_within_chunk[chunk_idx, :len(indexes)] = indexes
         result_indexes_whole[chunk_idx, :len(indexes)] = indexes + start
+
+        start += chunk_size
+
+    return result_values, result_indexes_whole, result_indexes_within_chunk
+
+
+def scatter_topk(src: Tensor, index: LongTensor, k: int, num_chunks=None, fill_value=None) \
+        -> Tuple[Tensor, LongTensor, LongTensor]:
+    """
+
+    Args:
+        src:
+        index: must be sorted in ascending order
+        k:
+        num_chunks:
+        fill_value:
+
+    Returns: A 1D tensor of shape [num_chunks * k]
+
+    """
+    if src.ndimension() > 1:
+        raise ValueError('Only implemented for 1D tensors')
+
+    if num_chunks is None:
+        num_chunks = index.max().item() + 1
+
+    if fill_value is None:
+        fill_value = float('NaN')
+
+    result_values = src.new_full((num_chunks * k,), fill_value=fill_value)
+    result_indexes_whole = index.new_full((num_chunks * k,), fill_value=-1)
+    result_indexes_within_chunk = index.new_full((num_chunks * k,), fill_value=-1)
+
+    chunk_sizes = index.new_zeros(num_chunks).scatter_add_(dim=0, index=index, src=torch.ones_like(index)).tolist()
+
+    start = 0
+    for chunk_idx, chunk_size in enumerate(chunk_sizes):
+        chunk = src[start:start + chunk_size]
+        values, indexes = torch.topk(chunk, k=min(k, chunk_size), dim=0)
+
+        result_values[chunk_idx * k:chunk_idx * k + len(values)] = values
+        result_indexes_within_chunk[chunk_idx * k:chunk_idx * k + len(indexes)] = indexes
+        result_indexes_whole[chunk_idx * k:chunk_idx * k + len(indexes)] = indexes + start
 
         start += chunk_size
 
