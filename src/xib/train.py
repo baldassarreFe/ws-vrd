@@ -425,7 +425,12 @@ def main():
     # region Run
     maybe_load_datasets()
     log_effective_config(conf, trainer, tb_logger)
-    trainer.run(train_dataloader, max_epochs=conf.session.max_epochs, seed=conf.session.seed)
+    max_epochs = conf.session.max_epochs
+    epoch_length = None
+    if 'resume' in conf:
+        max_epochs += trainer.state.epoch
+        epoch_length = len(train_dataloader)
+    trainer.run(train_dataloader, max_epochs=max_epochs, seed=conf.session.seed, epoch_length=epoch_length)
 
     add_session_end(tb_logger.writer, 'SUCCESS')
     tb_logger.close()

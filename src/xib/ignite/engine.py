@@ -64,7 +64,7 @@ class Trainer(CustomEngine):
     criterion: Callable[[Any, Any], torch.Tensor]
 
     # Make sure state.samples is serialized when `Engine.state_dict()` is called
-    _state_dict_all_req_keys = Engine._state_dict_all_req_keys + ('samples',)
+    _state_dict_all_req_keys = CustomEngine._state_dict_all_req_keys + ('samples',)
 
     def __init__(self, process_function, conf):
         super(Trainer, self).__init__(process_function, conf)
@@ -89,6 +89,11 @@ class Trainer(CustomEngine):
     def _increment_samples(trainer: Trainer):
         graphs: Batch = trainer.state.batch[0]
         trainer.state.samples += graphs.num_graphs
+
+    def load_state_dict(self, state_dict):
+        # Make sure state.samples is deserialized when `Engine.load_state_dict()` is called
+        super(Trainer, self).load_state_dict(state_dict)
+        setattr(self.state, 'samples', state_dict['samples'])
 
 
 class Validator(CustomEngine):
