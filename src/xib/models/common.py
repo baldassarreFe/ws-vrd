@@ -1,5 +1,6 @@
 from __future__ import annotations
 from collections import OrderedDict
+from enum import Enum
 
 import torch
 from torch import nn as nn
@@ -231,7 +232,12 @@ class EdgeModel(torch.nn.Module):
 
 
 class OutputGlobalModel(nn.Module):
-    def __init__(self, in_edge_features, fc_features, fc_layers, num_classes):
+
+    class ReadoutMode(Enum):
+        FC_MAX = 0  # fully_connected( max {edges} )
+        MAX_FC = 1  # max { fully_connected(edges) }
+
+    def __init__(self, in_edge_features, fc_features, fc_layers, num_classes, mode: str):
         super(OutputGlobalModel, self).__init__()
         in_features = in_edge_features
 
@@ -243,6 +249,12 @@ class OutputGlobalModel(nn.Module):
         fcs['output'] = nn.Linear(in_features, num_classes)
         self.fcs = nn.Sequential(fcs)
 
+        if isinstance(mode, str):
+            mode = OutputGlobalModel.ReadoutMode[mode]
+        if not isinstance(mode, OutputGlobalModel.ReadoutMode):
+            raise ValueError(f'Invalid readout mode: {mode}')
+
+        self.mode = mode
         self.out_features = num_classes
 
     def forward(
@@ -252,12 +264,19 @@ class OutputGlobalModel(nn.Module):
             node_to_graph_idx: torch.LongTensor,
             num_graphs: int
     ) -> torch.Tensor:
-        # If a graph has no edges, i.e. len(edge_to_graph_idx.unique) != 64:
+        # If a graph has no edges, i.e. len(edge_to_graph_idx.unique()) != num_graphs:
         # - if it also has 0 nodes it can cause a bug (see dataloader)
         # - if it has only 1 node, scatter max will fill its global vector with zeros
         #   and the fully connected layer simply apply the bias term
         edge_to_graph_idx = node_to_graph_idx[edge_indices[0]]
-        out = scatter_('max', edges, index=edge_to_graph_idx, dim=0, dim_size=num_graphs)
 
-        out = self.fcs(out)
+        if self.mode is OutputGlobalModel.ReadoutMode.FC_MAX:
+            out = scatter_('max', edges, index=edge_to_graph_idx, dim=0, dim_size=num_graphs)
+            out = self.fcs(out)
+        elif self.mode is OutputGlobalModel.ReadoutMode.MAX_FC:
+            edges = self.fcs(edges)
+            out = scatter_('max', edges, index=edge_to_graph_idx, dim=0, dim_size=num_graphs)
+        else:
+            raise ValueError(f'Invalid readout mode: {self.mode}')
+
         return out

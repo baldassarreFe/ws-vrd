@@ -47,8 +47,6 @@ class RelationalNetwork(nn.Module):
         )
 
         # Readout
-        # TODO write alternative redout that produces a [E, 117] edge-wise output
-        #      and then simply scatter_max graph-wise without further fully connected layers
         global_features = self.output_global_model(
             edges=edge_features,
             edge_indices=inputs.relation_indexes,
