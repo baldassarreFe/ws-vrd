@@ -1,6 +1,3 @@
-from enum import Enum
-from typing import Union
-
 import torch
 from torch_geometric.data import Batch
 
@@ -11,14 +8,9 @@ class VisualRelationExplainer(torch.nn.Module):
     # Gradients will be computed w.r.t. these input fields
     GRAD_WRT = ('object_linear_features', 'object_conv_features', 'relation_linear_features')
 
-    class ReadoutMode(Enum):
-        FC_MAX = 0
-        MAX_FC = 1
-
     def __init__(
             self,
             model: torch.nn.Module,
-            mode: Union[str, ReadoutMode],
             top_k_predicates: int = 10,
             top_x_relations: int = 100,
             **__
@@ -27,19 +19,12 @@ class VisualRelationExplainer(torch.nn.Module):
 
         Args:
             model:
-            mode:
             top_k_predicates: For each graph, try to explain only the TOP_K_PREDICATES
             top_x_relations: For each graph and predicate to explain, keep only
                              the TOP_X_RELATIONS (subject, predicate, object) as explanations
         """
         super().__init__()
 
-        if isinstance(mode, str):
-            mode = VisualRelationExplainer.ReadoutMode[mode]
-        if not isinstance(mode, VisualRelationExplainer.ReadoutMode):
-            raise ValueError(f'Invalid explanation mode: {mode}')
-
-        self.mode = mode
         self.model = model
         self.top_k_predicates = top_k_predicates
         self.top_x_relations = top_x_relations
@@ -53,13 +38,9 @@ class VisualRelationExplainer(torch.nn.Module):
 
     def forward(self, inputs: Batch) -> Batch:
         with torch.enable_grad():
-            if self.mode is VisualRelationExplainer.ReadoutMode.FC_MAX:
-                return self._explain_fc_max(inputs)
-            elif self.mode is VisualRelationExplainer.ReadoutMode.MAX_FC:
-                return self.explain_max_fc(inputs)
-            raise ValueError(f'Invalid explanation mode: {self.mode}')
+            return self._explain_visual_relations(inputs)
 
-    def _explain_fc_max(self, inputs: Batch) -> Batch:
+    def _explain_visual_relations(self, inputs: Batch) -> Batch:
         # Prepare input graphs
         inputs.apply(torch.Tensor.requires_grad_, *VisualRelationExplainer.GRAD_WRT)
         edge_to_graph_assignment = inputs.batch[inputs.relation_indexes[0]]
@@ -83,7 +64,6 @@ class VisualRelationExplainer(torch.nn.Module):
         relevance_edges = inputs.relation_linear_features.new_zeros(size=(E, self.top_k_predicates))
 
         with torch.enable_grad():
-
             # Forward pass to get predicate predictions
             outputs = self.model(inputs)
 

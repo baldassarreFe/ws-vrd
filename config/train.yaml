@@ -40,7 +40,6 @@ session:
     patience: 5
 
 visual_relations:
-  mode: FC_MAX
   top_k_predicates: 5
   top_x_relations: 100
   evaluation: PREDICATE_PREDICTION
@@ -50,4 +49,3 @@ hparams:
   loss/rank--lrank: ${losses.rank.weight}
   opt/weight_decay--wd: ${optimizer.weight_decay}
   vr/topk--topk: ${visual_relations.top_k_predicates}
-  vr/mode--vrm: ${visual_relations.mode}
