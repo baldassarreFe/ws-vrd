@@ -1,3 +1,5 @@
+from typing import overload
+
 import torch
 from detectron2.structures import Boxes
 
@@ -85,7 +87,17 @@ def matched_boxlist_intersection(boxes_a: Boxes, boxes_b: Boxes) -> Boxes:
     return Boxes(boxes_inters)
 
 
-def matched_boxlist_union(boxes_a: Boxes, boxes_b: Boxes) -> Boxes:
+@overload
+def matched_boxlist_union(a: Boxes, b: Boxes) -> Boxes:
+    ...
+
+
+@overload
+def matched_boxlist_union(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    ...
+
+
+def matched_boxlist_union(a, b):
     """ Compute the union box between corresponding boxes:
 
     ::
@@ -102,21 +114,26 @@ def matched_boxlist_union(boxes_a: Boxes, boxes_b: Boxes) -> Boxes:
       V y                                        V y
 
     Args:
-        boxes_a:
-        boxes_b:
+        a: [N, 4] tensor or Boxes instance
+        b: [N, 4] tensor or Boxes instance
 
     Returns:
 
     """
-    if len(boxes_a) != len(boxes_b):
+    if isinstance(a, Boxes) and isinstance(b, Boxes):
+        return Boxes(matched_boxlist_union(a.tensor, b.tensor))
+
+    if not isinstance(a, torch.Tensor) or not isinstance(b, torch.Tensor):
+        raise ValueError(f'Unkown data type {type(a)}, {type(b)}')
+
+    if len(a) != len(b):
         raise ValueError(f'The two boxes must have the same length')
+    if not a.shape[1] == b.shape[1] == 4:
+        raise ValueError(f'Wrong box shape {a.shape}, {b.shape}')
 
     # Boxes are represented as N x (x1, y1, x2, y2):
-    a = boxes_a.tensor  # N x 4
-    b = boxes_b.tensor  # N x 4
+    union_top_left = torch.min(a[:, :2], b[:, :2])  # N x (x1, y1)
+    union_bottom_right = torch.max(a[:, 2:], b[:, 2:])  # N x (x2, y2)
+    boxes_union = torch.cat((union_top_left, union_bottom_right), dim=1)
 
-    inters_top_left = torch.min(a[:, :2], b[:, :2])  # N x (x1, y1)
-    inters_bottom_right = torch.max(a[:, 2:], b[:, 2:])  # N x (x2, y2)
-    boxes_inters = torch.cat((inters_top_left, inters_bottom_right), dim=1)
-
-    return Boxes(boxes_inters)
+    return boxes_union
