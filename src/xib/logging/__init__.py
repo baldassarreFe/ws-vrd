@@ -1,9 +1,8 @@
-from .loguru import loguru, logger, add_logfile
+from .loguru import setup_logging, add_logfile
 from .custom_scalars import add_custom_scalars
 
 __all__ = [
-    'loguru',
-    'logger',
     'add_logfile',
+    'setup_logging',
     'add_custom_scalars',
 ]

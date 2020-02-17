@@ -1,10 +1,10 @@
 import functools
+import logging as _logging
+from pathlib import Path
 from typing import Union
 
 import loguru
-import logging as _logging
 import tqdm as _tqdm
-from pathlib import Path
 
 # Disable ignite debug messages
 _default_filter = {
@@ -20,15 +20,6 @@ _default_format = (
     '<level>{level: <8}</level> | '
     '<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - '
     '<level>{message}</level>'
-)
-
-# Avoid tqdm and loguru clashes
-loguru.logger.remove()
-loguru.logger.add(
-    sink=functools.partial(_tqdm.tqdm.write, end=""),
-    colorize=True,
-    filter=_default_filter,
-    format=_default_format
 )
 
 
@@ -49,8 +40,18 @@ class InterceptHandler(_logging.Handler):
         loguru.logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
 
 
-# Intercept standard logging messages toward your Loguru sinks
-_logging.basicConfig(handlers=[InterceptHandler()], level=0)
+def setup_logging():
+    # Avoid tqdm and loguru clashes
+    loguru.logger.remove()
+    loguru.logger.add(
+        sink=functools.partial(_tqdm.tqdm.write, end=""),
+        colorize=True,
+        filter=_default_filter,
+        format=_default_format
+    )
+
+    # Intercept standard logging messages toward your Loguru sinks
+    _logging.basicConfig(handlers=[InterceptHandler()], level=0)
 
 
 def add_logfile(path: Union[str, Path], format=None, filter=None):
@@ -65,6 +66,3 @@ def add_logfile(path: Union[str, Path], format=None, filter=None):
         filter=filter,
         mode='a'
     )
-
-
-logger = loguru.logger

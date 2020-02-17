@@ -3,40 +3,36 @@ import random
 import socket
 import textwrap
 from operator import itemgetter
-
-from typing import Callable, Tuple, Any, Dict, Mapping
 from pathlib import Path
+from typing import Callable, Tuple, Any, Dict, Mapping
 
-import pyaml
 import numpy as np
-
+import pyaml
 import torch
 import torch.utils.data
-from torch.utils.data import Dataset, DataLoader
-from torch.optim.optimizer import Optimizer
-
-from torch_geometric.data import Batch
-
-from omegaconf import OmegaConf
-
-from ignite.engine import Engine, Events
-from ignite.metrics import Average
-from ignite.handlers import Checkpoint, DiskSaver, EarlyStopping
 from ignite.contrib.handlers import TensorboardLogger, ProgressBar
 from ignite.contrib.handlers.tensorboard_logger import OutputHandler
+from ignite.engine import Engine, Events
+from ignite.handlers import Checkpoint, DiskSaver, EarlyStopping
+from ignite.metrics import Average
+from loguru import logger
+from omegaconf import OmegaConf
+from torch.optim.optimizer import Optimizer
+from torch.utils.data import Dataset, DataLoader
+from torch_geometric.data import Batch
 
-from .utils import import_, noop
 from .config import parse_args
-from .ignite import PredicatePredictionLogger
-from .ignite import Trainer, Validator
-from .ignite import RecallAtBatch, RecallAtEpoch
-from .ignite import VisualRelationPredictionLogger, VisualRelationRecallAt
+from .datasets import DatasetCatalog, DatasetFolder
 from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch
 from .ignite import MetricsHandler, OptimizerParamsHandler, EpochHandler
-from .logging import logger, add_logfile, add_custom_scalars
-from .datasets import DatasetCatalog, DatasetFolder
-from .models.visual_relations_explainer import VisualRelationExplainer
+from .ignite import PredicatePredictionLogger
+from .ignite import RecallAtBatch, RecallAtEpoch
+from .ignite import Trainer, Validator
+from .ignite import VisualRelationPredictionLogger, VisualRelationRecallAt
+from .logging import setup_logging, add_logfile, add_custom_scalars
 from .logging.hyperparameters import add_hparam_summary, add_session_start, add_session_end
+from .models.visual_relations_explainer import VisualRelationExplainer
+from .utils import import_
 
 
 def setup_seeds(seed):
@@ -47,7 +43,7 @@ def setup_seeds(seed):
     torch.manual_seed(seed)
 
 
-def setup_logging(conf: OmegaConf) -> [TensorboardLogger, TensorboardLogger]:
+def setup_all_loggers(conf: OmegaConf) -> [TensorboardLogger, TensorboardLogger]:
     folder = Path(conf.checkpoint.folder).expanduser().resolve() / conf.fullname
     folder.mkdir(parents=True, exist_ok=True)
 
@@ -246,7 +242,7 @@ def main():
     # region Setup
     conf = parse_args()
     setup_seeds(conf.session.seed)
-    tb_logger, tb_img_logger = setup_logging(conf)
+    tb_logger, tb_img_logger = setup_all_loggers(conf)
     logger.info('Parsed configuration:\n' +
                 pyaml.dump(OmegaConf.to_container(conf), safe=True, sort_dicts=False, force_embed=True))
 
@@ -528,4 +524,5 @@ def main():
 
 
 if __name__ == '__main__':
+    setup_logging()
     main()

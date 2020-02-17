@@ -7,7 +7,7 @@
 - Vocabulary
   - 1 subject (person)
   - 117 predicates
-  - 80 objects
+  - 80 objects (same as [COCO](http://cocodataset.org/#download))
 - 7.9 GB (in matlab)
 
 Test detectron detections with:
@@ -34,19 +34,19 @@ python -m xib.preprocessing.hico_det \
   --skip-existing \
   --confidence-threshold=.3 \
   --nms-threshold=.7 \
-  --detectron-home="${HOME}/detectron2" \
   --output-dir="data/processed/hico_20160224_det"
 ```
 
 ## Visual Relationship Detection
 - [Visual Relationship Detection](https://cs.stanford.edu/people/ranjaykrishna/vrd/)
-- 5000+ images (same images of [Scene Graphs](https://cs.stanford.edu/~danfei/scene-graph/), 
-  download [here](http://imagenet.stanford.edu/internal/jcjohns/scene_graphs/sg_dataset.zip))
+- 5000+ images, same of [Scene Graphs](https://cs.stanford.edu/~danfei/scene-graph/)
 - Vocabulary
   - 100 subjects
   - 70 predicates
   - 100 objects
-- 1.9 GB
+- Download:
+  - Images 1.9 GB [here](http://imagenet.stanford.edu/internal/jcjohns/scene_graphs/sg_dataset.zip)
+  - Annotations [here](http://cs.stanford.edu/people/ranjaykrishna/vrd/json_dataset.zip)
 
 ## UnRel
 - [Unusual Relations](https://www.di.ens.fr/willow/research/unrel/)

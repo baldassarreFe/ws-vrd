@@ -1,20 +1,19 @@
-import time
 import argparse
+import time
 from enum import Enum
-
-from typing import Union, Iterator, Optional, List, Dict, Tuple, Mapping
 from pathlib import Path
+from typing import Union, Iterator, Optional, List, Dict, Tuple, Mapping
 
-import torch
 import scipy.io
+import torch
 from detectron2.structures import Boxes, Instances, pairwise_iou
-
 from loguru import logger
 
-from ..utils import SigIntCatcher
-from ..structures import VisualRelations, ImageSize
-from ..detectron2 import DetectronWrapper, boxes_to_edge_features
 from ..datasets.hico_det import HicoDetSample, OBJECTS, PREDICATES
+from ..detectron2 import DetectronWrapper, boxes_to_edge_features
+from ..logging import setup_logging, add_logfile
+from ..structures import VisualRelations, ImageSize
+from ..utils import SigIntCatcher
 
 
 def parse_args():
@@ -29,7 +28,6 @@ def parse_args():
 
     parser.add_argument('--nms-threshold', required=True, type=float, default=.7)
     parser.add_argument('--confidence-threshold', required=True, type=float, default=.3)
-    parser.add_argument('--detectron-home', required=True, type=resolve_path, default='~/detectron2')
 
     return parser.parse_args()
 
@@ -268,15 +266,14 @@ def main():
     args = parse_args()
 
     # Check files and folders
-    if not args.detectron_home.is_dir():
-        raise ValueError(f'Not a directory: {args.detectron_home}')
     if not args.hico_dir.is_dir():
         raise ValueError(f'Not a directory: {args.hico_dir}')
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    add_logfile(args.output_dir / f'preprocessing_{int(time.time())}.log')
 
     # Build detectron model
     torch.set_grad_enabled(False)
-    detectron = DetectronWrapper(detectron_home=args.detectron_home, threshold=args.confidence_threshold)
+    detectron = DetectronWrapper(threshold=args.confidence_threshold)
 
     # Load ground truth bounding boxes and human-object relations from the matlab file,
     # then process the image with detectron to extract visual features of the boxes.
@@ -356,9 +353,8 @@ def main():
             f'- Detectron instances {d2_det_count:,}',
         ))
         logger.info(f'\n{message}')
-        with output_dir.joinpath(f'preprocessing_{int(time.time())}.log').open(mode='w') as f:
-            f.write(message)
 
 
 if __name__ == '__main__':
+    setup_logging()
     main()

@@ -9,6 +9,7 @@ from loguru import logger
 
 from detectron2.config import get_cfg
 from detectron2.engine import DefaultPredictor
+from detectron2.model_zoo import get_config_file, get_checkpoint_url
 from detectron2.structures import Boxes, Instances
 
 from .node_features import boxes_to_node_features
@@ -16,14 +17,14 @@ from ..structures import ImageSize, clone_instances
 
 
 class DetectronWrapper(object):
-    CFG_PATH = 'configs/COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x.yaml'
-    WEIGHTS_URL = 'detectron2://COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x/139173657/model_final_68b088.pkl'
+    CFG_PATH = 'COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x.yaml'
 
-    def __init__(self, detectron_home: Union[str, Path], threshold: float = .5):
+    def __init__(self, threshold: float = .5):
         cfg = get_cfg()
-        cfg.merge_from_file(Path(detectron_home).joinpath(self.CFG_PATH).expanduser().resolve().as_posix())
+        cfg.merge_from_file(get_config_file(self.CFG_PATH))
+        cfg.MODEL.WEIGHTS = get_checkpoint_url(self.CFG_PATH)
         cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = threshold
-        cfg.MODEL.WEIGHTS = self.WEIGHTS_URL
+        logger.info(f'Detectron2 configuration:\n{cfg}')
         self.d2 = DefaultPredictor(cfg)
 
     @overload
