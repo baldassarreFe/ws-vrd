@@ -1,8 +1,8 @@
+from ...structures import Vocabulary
+
 # These are taken to be exactly the same and in the same order as COCO
 # detectron2.data.catalog.MetadataCatalog.get('coco_2017_train').thing_classes
 # except that there is a '_' instead of a ' ', to respect the annotation in the matlab file
-from ...structures import Vocabulary
-
 OBJECTS = Vocabulary((
     'person',
     'bicycle',
