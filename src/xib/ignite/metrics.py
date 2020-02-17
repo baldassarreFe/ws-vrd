@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import textwrap
 from abc import ABC
 from enum import Enum
@@ -5,19 +7,18 @@ from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Union, Iterator, Callable
 
 import cv2
-import torch
 import numpy as np
 import sklearn.metrics
-from collections import defaultdict
-
-from tensorboardX import SummaryWriter
+import torch
 from ignite.engine import Events, Engine
 from ignite.metrics import Metric
-from torchvision.ops import box_iou
+from tensorboardX import SummaryWriter
 from torch_geometric.data import Batch
 from torch_geometric.utils import scatter_
+from torchvision.ops import box_iou
 
 from ..structures import ImageSize, Vocabulary, matched_boxlist_union
+from ..utils.utils import NamedEnumMixin
 
 
 class BatchMetric(Metric, ABC):
@@ -34,7 +35,7 @@ class BatchMetric(Metric, ABC):
         engine.add_event_handler(Events.ITERATION_COMPLETED, self.completed, name)
 
 
-def mean_average_precision(annotations, scores):
+def mean_average_precision(annotations, scores) -> float:
     """Computes the mean average precision (mAP) for a multi-class multi-label scenario.
 
     In object detection mAP is the average AP across all classes, i.e.
@@ -57,7 +58,7 @@ def mean_average_precision(annotations, scores):
             average=None
         )
 
-    return np.nanmean(average_precisions)
+    return np.nanmean(average_precisions).item()
 
 
 class MeanAveragePrecisionBatch(BatchMetric):
@@ -409,13 +410,13 @@ class VisualRelationPredictionLogger(object):
         for b in range(min(relations.num_graphs, self.grid[0] * self.grid[1])):
             buffer = (
                 f'{filenames[b]}\n'
-                f'- insances {relations.n_nodes[b].item()}\n'
-                f'- (subj, obj) pairs {(relations.n_nodes[b] * (relations.n_nodes[b] - 1)).item()}\n'
+                f'- input instances {relations.n_nodes[b].item()}\n'
+                f'- (subj, obj) pairs {(relations.n_nodes[b] * (relations.n_nodes[b] - 1)).item()}\n\n'
             )
 
             top_x_relations = set()
             count_retrieved = 0
-            buffer += f'Top {relations.n_edges[b].item()} relations:\n'
+            buffer += f'Top {relations.n_edges[b].item()} predicted relations:\n'
             for i in range(relations.n_edges[b].item()):
                 node_offset = pred_node_offsets[b]
                 score = pred_relation_scores[b][i].item()
@@ -428,8 +429,8 @@ class VisualRelationPredictionLogger(object):
 
                 subj_class = relations.object_classes[pred_relation_indexes[b][0, i]].item()
                 obj_class = relations.object_classes[pred_relation_indexes[b][1, i]].item()
-                subj_box = relations.object_boxes[pred_relation_indexes[b][0, i]].cpu().numpy().round(1)
-                obj_box = relations.object_boxes[pred_relation_indexes[b][1, i]].cpu().numpy().round(1)
+                subj_box = relations.object_boxes[pred_relation_indexes[b][0, i]].cpu().int().numpy()
+                obj_box = relations.object_boxes[pred_relation_indexes[b][1, i]].cpu().int().numpy()
                 subj_str = self.object_vocabulary.get_str(subj_class)
                 obj_str = self.object_vocabulary.get_str(obj_class)
 
@@ -453,12 +454,13 @@ class VisualRelationPredictionLogger(object):
 
                 subj_class = targets.object_classes[gt_relation_indexes[b][0, j]].item()
                 obj_class = targets.object_classes[gt_relation_indexes[b][1, j]].item()
-                subj_box = targets.object_boxes[gt_relation_indexes[b][0, j]].cpu().numpy().round(1)
-                obj_box = targets.object_boxes[gt_relation_indexes[b][1, j]].cpu().numpy().round(1)
+                subj_box = targets.object_boxes[gt_relation_indexes[b][0, j]].cpu().int().numpy()
+                obj_box = targets.object_boxes[gt_relation_indexes[b][1, j]].cpu().int().numpy()
                 subj_str = self.object_vocabulary.get_str(subj_class)
                 obj_str = self.object_vocabulary.get_str(obj_class)
 
                 # Assume the input boxes are from GT, not detectron, otherwise we'd have to match by IoU
+                # TODO add matching by IoU
                 retrieved = (subj_class, subj_idx, predicate_class, obj_idx, obj_class) in top_x_relations
                 if retrieved:
                     count_retrieved += 1
@@ -474,7 +476,7 @@ class VisualRelationPredictionLogger(object):
 
             text += textwrap.indent(buffer, '    ', lambda line: True) + '---\n\n'
 
-        self.logger.add_text('Visual relations', text, global_step=global_step)
+        self.logger.add_text(f'Visual relations ({self.tag})', text, global_step=global_step)
 
         # fig, axes = plt.subplots(*self.grid, figsize=(16, 12), dpi=50)
         # axes_iter: Iterator[plt.Axes] = axes.flat
@@ -534,7 +536,7 @@ class VisualRelationPredictionLogger(object):
 
 
 class VisualRelationRecallAt(object):
-    class Mode(Enum):
+    class Mode(NamedEnumMixin, Enum):
         PREDICATE_DETECTION = 'predicate'
         PHRASE_DETECTION = 'phrase'
         RELATIONSHIP_DETECTION = 'relation'
@@ -542,13 +544,8 @@ class VisualRelationRecallAt(object):
         def __init__(self, short_name):
             self.short_name = short_name
 
-    def __init__(self, mode, steps: Tuple[int, ...]):
-        if isinstance(mode, str):
-            mode = VisualRelationRecallAt.Mode[mode]
-        if not isinstance(mode, VisualRelationRecallAt.Mode):
-            raise ValueError(f'Invalid visual relations mode: {mode}')
-
-        self.mode = mode
+    def __init__(self, mode: Union[str, VisualRelationRecallAt.Mode], steps: Tuple[int, ...]):
+        self.mode = VisualRelationRecallAt.Mode.get(mode)
         self.steps = torch.tensor(sorted(steps))
 
     def __call__(self, engine: Engine):

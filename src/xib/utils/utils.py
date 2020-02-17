@@ -1,5 +1,6 @@
+from enum import Enum
 from functools import wraps
-from typing import Mapping, Sequence, Generator, Tuple, Any
+from typing import Mapping, Sequence, Generator, Tuple, Any, Union
 
 import torch
 import numpy as np
@@ -44,3 +45,13 @@ def apples_to_apples(f):
         return f(cls, input)
 
     return wrapper
+
+
+class NamedEnumMixin(object):
+    @classmethod
+    def get(cls, value: Union[str, Enum]):
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            return cls[value]
+        raise ValueError(f'Invalid value {value} for {cls}')

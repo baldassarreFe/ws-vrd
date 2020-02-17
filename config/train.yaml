@@ -5,12 +5,11 @@ tags:
 
 dataset:
   name: hico_det
-  split: .75
   eager: yes
   image_dir: data/raw/hico_20160224_det/images/train2015
   trainval:
     folder: data/processed/hico_20160224_det/train
-    input_mode: GT
+    split: .75
 
 dataloader:
   batch_size: 64
@@ -42,7 +41,6 @@ session:
 visual_relations:
   top_k_predicates: 5
   top_x_relations: 100
-  evaluation: PREDICATE_PREDICTION
 
 hparams:
   loss/bce--lbce: ${losses.bce.weight}

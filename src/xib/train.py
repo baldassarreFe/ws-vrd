@@ -34,7 +34,7 @@ from .ignite import VisualRelationPredictionLogger, VisualRelationRecallAt
 from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch
 from .ignite import MetricsHandler, OptimizerParamsHandler, EpochHandler
 from .logging import logger, add_logfile, add_custom_scalars
-from .datasets import DatasetCatalog
+from .datasets import DatasetCatalog, DatasetFolder
 from .models.visual_relations_explainer import VisualRelationExplainer
 from .logging.hyperparameters import add_hparam_summary, add_session_start, add_session_end
 
@@ -67,7 +67,8 @@ def setup_logging(conf: OmegaConf) -> [TensorboardLogger, TensorboardLogger]:
     return tb_logger, tb_img_logger
 
 
-def training_step(trainer: Trainer, batch: Batch):
+def pred_class_training_step(trainer: Trainer, batch: Batch):
+    """Predicate classification training step"""
     inputs, targets, _ = batch
     inputs = inputs.to(trainer.conf.session.device)
     targets = targets.to(trainer.conf.session.device)
@@ -86,7 +87,8 @@ def training_step(trainer: Trainer, batch: Batch):
     }
 
 
-def predicate_prediction_validation_step(validator: Validator, batch: Batch):
+def pred_class_validation_step(validator: Validator, batch: Batch):
+    """Predicate classification validation step"""
     inputs, targets, filenames = batch
     inputs = inputs.to(validator.conf.session.device)
     targets = targets.to(validator.conf.session.device)
@@ -102,7 +104,15 @@ def predicate_prediction_validation_step(validator: Validator, batch: Batch):
     }
 
 
-def relationship_prediction_validation_step(validator: Validator, batch: Batch):
+def vr_validation_step(validator: Validator, batch: Batch):
+    """Visual relationship detection validation step
+
+    Shared by:
+    - predicate detection (if run with ground-truth boxes as input)
+    - phrase detection (if run with detectron2 boxes as input)
+    - relationship detection (if run with detectron2 boxes as input)
+
+    """
     inputs, targets, filenames = batch
     inputs = inputs.to(validator.conf.session.device)
 
@@ -111,7 +121,9 @@ def relationship_prediction_validation_step(validator: Validator, batch: Batch):
     return {'relations': relations.to('cpu')}
 
 
-class PredicatePredictionCriterion(object):
+class PredicateClassificationCriterion(object):
+    """Binary cross entropy and ranking loss for predicate classification"""
+
     def __init__(self, conf: OmegaConf):
         self.bce_weight = conf.bce.weight
         self.rank_weight = conf.rank.weight
@@ -158,70 +170,50 @@ def build_optimizer_and_scheduler(conf: OmegaConf, model: torch.nn.Module) -> Tu
     return optimizer, scheduler
 
 
-def build_datasets(conf) -> Tuple[Dataset, Dataset, Callable[[], None], Mapping[str, Any]]:
+def build_datasets(conf) -> Tuple[Mapping[str, Dataset], Mapping[str, Any]]:
     ds = DatasetCatalog.get(conf.dataset.name)
 
-    if 'trainval' in conf.dataset and 'split' in conf.dataset:
-        rg = np.random.default_rng(conf.session.seed)
-        dataset = ds['class'](**conf.dataset.trainval)
-        indexes = rg.permutation(len(dataset))
-        train_split = indexes[:int(conf.dataset.split * len(dataset))]
-        val_split = indexes[int(conf.dataset.split * len(dataset)):]
-        train_dataset = torch.utils.data.Subset(dataset, train_split)
-        val_dataset = torch.utils.data.Subset(dataset, val_split)
-
-        def eager_op():
-            dataset.load_eager()
+    if 'trainval' in conf.dataset:
+        folder = DatasetFolder.from_folder(conf.dataset.trainval.folder, suffix='.pth')
+        train_folder, val_folder = folder.split(conf.dataset.trainval.split, random_state=conf.session.seed)
     elif 'train' in conf.dataset and 'val' in conf.dataset:
-        train_dataset = ds['class'](**conf.dataset.train)
-        val_dataset = ds['class'](**conf.dataset.val)
-
-        def eager_op():
-            train_dataset.load_eager()
-            val_dataset.load_eager()
+        train_folder = DatasetFolder.from_folder(conf.dataset.train.folder, suffix='.pth')
+        val_folder = DatasetFolder.from_folder(conf.dataset.val.folder, suffix='.pth')
     else:
         raise ValueError(f'Invalid data specification:\n{conf.dataset.pretty()}')
 
-    logger.info(f'Data split: {len(train_dataset)} train, {len(val_dataset)} val ('
-                f'{100 * len(train_dataset) / (len(train_dataset) + len(val_dataset)):.1f}/'
-                f'{100 * len(val_dataset) / (len(train_dataset) + len(val_dataset)):.1f}%)')
+    logger.info(f'Data split: {len(train_folder)} train, {len(val_folder)} val ('
+                f'{100 * len(train_folder) / (len(train_folder) + len(val_folder)):.1f}/'
+                f'{100 * len(val_folder) / (len(train_folder) + len(val_folder)):.1f}%)')
 
-    if not conf.dataset.eager:
-        eager_op = noop
+    datasets = {
+        'train_gt': ds['class'](train_folder, input_mode='GT'),
+        'val_gt': ds['class'](val_folder, input_mode='GT'),
+        'val_d2': ds['class'](val_folder, input_mode='D2'),
+    }
+    return datasets, ds['metadata']
 
-    return train_dataset, val_dataset, eager_op, ds['metadata']
 
-
-def build_dataloaders(conf, train_dataset: Dataset, val_dataset: Dataset) -> Tuple[DataLoader, DataLoader]:
+def build_dataloaders(conf, datasets: Mapping[str, Dataset]) -> Dict[str, DataLoader]:
     def collate_fn(batch):
         inputs, targets, filenames = zip(*batch)
-
         inputs = Batch.from_data_list(inputs)
         targets = Batch.from_data_list(targets)
-
         return inputs, targets, filenames
 
-    train_dataloader = DataLoader(
-        train_dataset,
+    kwargs = dict(
         batch_size=conf.dataloader.batch_size,
-        shuffle=True,
         num_workers=conf.dataloader.num_workers,
         pin_memory='cuda' in conf.session.device,
         drop_last=True,
         collate_fn=collate_fn
     )
 
-    val_dataloader = DataLoader(
-        val_dataset,
-        batch_size=conf.dataloader.batch_size,
-        shuffle=False,
-        num_workers=conf.dataloader.num_workers,
-        pin_memory='cuda' in conf.session.device,
-        drop_last=True,
-        collate_fn=collate_fn
-    )
-
-    return train_dataloader, val_dataloader
+    return {
+        'train_gt': DataLoader(datasets['train_gt'], shuffle=True, **kwargs),
+        'val_gt': DataLoader(datasets['val_gt'], shuffle=False, **kwargs),
+        'val_d2': DataLoader(datasets['val_d2'], shuffle=False, **kwargs)
+    }
 
 
 def build_model(conf: OmegaConf) -> torch.nn.Module:
@@ -230,7 +222,7 @@ def build_model(conf: OmegaConf) -> torch.nn.Module:
     return model
 
 
-def log_metrics(engine: Engine, tag: str, global_step_fn: Callable[[], int]):
+def log_metrics(engine: Engine, name, tag: str, global_step_fn: Callable[[], int]):
     global_step = global_step_fn()
     yaml = pyaml.dump({f'{tag}/{k}': v for k, v in engine.state.metrics.items()},
                       safe=True, sort_dicts=True, force_embed=True)
@@ -258,121 +250,146 @@ def main():
     logger.info('Parsed configuration:\n' +
                 pyaml.dump(OmegaConf.to_container(conf), safe=True, sort_dicts=False, force_embed=True))
 
-    trainer = Trainer(training_step, conf)
-    predicate_predication_validator = Validator(predicate_prediction_validation_step, conf)
-
+    # region Predicate classification engines
     model = build_model(conf.model).to(conf.session.device)
-    trainer.model = predicate_predication_validator.model = model
-    trainer.criterion = predicate_predication_validator.criterion = PredicatePredictionCriterion(conf.losses)
-    trainer.optimizer, scheduler = build_optimizer_and_scheduler(conf.optimizer, trainer.model)
+    criterion = PredicateClassificationCriterion(conf.losses)
 
-    relationship_prediction_validator = Validator(relationship_prediction_validation_step, conf)
-    relationship_prediction_validator.model = VisualRelationExplainer(model, **conf.visual_relations)
+    pred_class_trainer = Trainer(pred_class_training_step, conf)
+    pred_class_trainer.model = model
+    pred_class_trainer.criterion = criterion
+    pred_class_trainer.optimizer, scheduler = build_optimizer_and_scheduler(conf.optimizer, pred_class_trainer.model)
+
+    pred_class_validator = Validator(pred_class_validation_step, conf)
+    pred_class_validator.model = model
+    pred_class_validator.criterion = criterion
+    # endregion
+
+    # region Visual Relations engines
+    vr_model = VisualRelationExplainer(model, **conf.visual_relations)
+
+    vr_predicate_validator = Validator(vr_validation_step, conf)
+    vr_predicate_validator.model = vr_model
+
+    vr_phrase_and_relation_validator = Validator(vr_validation_step, conf)
+    vr_phrase_and_relation_validator.model = vr_model
+    # endregion
 
     if 'resume' in conf:
         checkpoint = Path(conf.resume.checkpoint).expanduser().resolve()
         logger.debug(f'Resuming checkpoint from {checkpoint}')
         Checkpoint.load_objects({
-            'model': trainer.model,
-            'optimizer': trainer.optimizer,
+            'model': pred_class_trainer.model,
+            'optimizer': pred_class_trainer.optimizer,
             'scheduler': scheduler,
-            'trainer': trainer,
+            'trainer': pred_class_trainer,
         }, checkpoint=torch.load(checkpoint, map_location=conf.session.device))
-        logger.info(f'Resumed from {checkpoint}, epoch {trainer.state.epoch}, samples {trainer.global_step()}')
+        logger.info(f'Resumed from {checkpoint}, '
+                    f'epoch {pred_class_trainer.state.epoch}, '
+                    f'samples {pred_class_trainer.global_step()}')
 
-    train_dataset, val_dataset, maybe_load_datasets, dataset_metadata = build_datasets(conf)
-    train_dataloader, val_dataloader = build_dataloaders(conf, train_dataset, val_dataset)
+    datasets, dataset_metadata = build_datasets(conf)
+    dataloaders = build_dataloaders(conf, datasets)
     # endregion
 
-    # region Training callbacks
+    # region Predicate classification training callbacks
     tb_logger.attach(
-        trainer,
-        OptimizerParamsHandler(trainer.optimizer, param_name='lr', tag='z', global_step_transform=trainer.global_step),
+        pred_class_trainer,
+        OptimizerParamsHandler(pred_class_trainer.optimizer, param_name='lr', tag='z',
+                               global_step_transform=pred_class_trainer.global_step),
         Events.EPOCH_STARTED
     )
 
-    MeanAveragePrecisionBatch(output_transform=itemgetter('target', 'output')).attach(trainer, 'mAP')
-    RecallAtBatch(output_transform=itemgetter('target', 'output'), sizes=(5, 10)).attach(trainer, 'recall_at')
+    MeanAveragePrecisionBatch(output_transform=itemgetter('target', 'output')).attach(pred_class_trainer, 'mAP')
+    RecallAtBatch(output_transform=itemgetter('target', 'output'), sizes=(5, 10)).attach(pred_class_trainer,
+                                                                                         'recall_at')
 
-    ProgressBar(persist=True, desc='Train').attach(trainer, metric_names='all', output_transform=itemgetter('losses'))
+    ProgressBar(persist=True, desc='Pred class train').attach(pred_class_trainer, metric_names='all',
+                                                   output_transform=itemgetter('losses'))
 
     tb_logger.attach(
-        trainer,
-        OutputHandler('train', output_transform=itemgetter('losses'), global_step_transform=trainer.global_step),
+        pred_class_trainer,
+        OutputHandler('train', output_transform=itemgetter('losses'),
+                      global_step_transform=pred_class_trainer.global_step),
         Events.ITERATION_COMPLETED
     )
     tb_logger.attach(
-        trainer,
-        MetricsHandler('train', global_step_transform=trainer.global_step),
+        pred_class_trainer,
+        MetricsHandler('train', global_step_transform=pred_class_trainer.global_step),
         Events.ITERATION_COMPLETED
     )
 
-    trainer.add_event_handler(
+    pred_class_trainer.add_event_handler(
         Events.EPOCH_COMPLETED,
         log_metrics,
+        'Predicate classification training',
         'train',
-        trainer.global_step
+        pred_class_trainer.global_step
     )
-    trainer.add_event_handler(
+    pred_class_trainer.add_event_handler(
         Events.EPOCH_COMPLETED,
         PredicatePredictionLogger(grid=(2, 3), img_dir=conf.dataset.image_dir, tag='train',
                                   logger=tb_img_logger.writer, predicate_vocabulary=dataset_metadata['predicates'],
-                                  global_step_fn=trainer.global_step)
+                                  global_step_fn=pred_class_trainer.global_step)
     )
     tb_logger.attach(
-        trainer,
-        EpochHandler(trainer, tag='z', global_step_transform=trainer.global_step),
+        pred_class_trainer,
+        EpochHandler(pred_class_trainer, tag='z', global_step_transform=pred_class_trainer.global_step),
         Events.EPOCH_COMPLETED
     )
 
-    trainer.add_event_handler(
+    pred_class_trainer.add_event_handler(
         Events.EPOCH_COMPLETED,
-        lambda _: predicate_predication_validator.run(val_dataloader)
+        lambda _: pred_class_validator.run(dataloaders['val_gt'])
     )
-    trainer.add_event_handler(
+    pred_class_trainer.add_event_handler(
         Events.EPOCH_COMPLETED(every=3),
-        lambda _: relationship_prediction_validator.run(val_dataloader)
+        lambda _: vr_predicate_validator.run(dataloaders['val_gt'])
+    )
+    pred_class_trainer.add_event_handler(
+        Events.EPOCH_COMPLETED(every=3),
+        lambda _: vr_phrase_and_relation_validator.run(dataloaders['val_d2'])
     )
     # endregion
 
-    # region Predicate prediction validation callbacks
+    # region Predicate classification validation callbacks
     if conf.losses['bce']['weight'] > 0:
         Average(
             output_transform=lambda o: o['losses']['loss/bce'],
             device=conf.session.device
-        ).attach(predicate_predication_validator, 'loss/bce')
+        ).attach(pred_class_validator, 'loss/bce')
     if conf.losses['rank']['weight'] > 0:
         Average(
             output_transform=lambda o: o['losses']['loss/rank'],
             device=conf.session.device
-        ).attach(predicate_predication_validator, 'loss/rank')
+        ).attach(pred_class_validator, 'loss/rank')
     Average(
         output_transform=lambda o: o['losses']['loss/total'],
         device=conf.session.device
-    ).attach(predicate_predication_validator, 'loss/total')
+    ).attach(pred_class_validator, 'loss/total')
 
-    MeanAveragePrecisionEpoch(itemgetter('target', 'output')).attach(predicate_predication_validator, 'mAP')
-    RecallAtEpoch((5, 10), itemgetter('target', 'output')).attach(predicate_predication_validator, 'recall_at')
+    MeanAveragePrecisionEpoch(itemgetter('target', 'output')).attach(pred_class_validator, 'mAP')
+    RecallAtEpoch((5, 10), itemgetter('target', 'output')).attach(pred_class_validator, 'recall_at')
 
-    ProgressBar(persist=True, desc='Pred val').attach(
-        predicate_predication_validator, metric_names='all', output_transform=itemgetter('losses'))
+    ProgressBar(persist=True, desc='Pred class val').attach(
+        pred_class_validator, metric_names='all', output_transform=itemgetter('losses'))
 
-    predicate_predication_validator.add_event_handler(
+    pred_class_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
         lambda val_engine: scheduler.step(val_engine.state.metrics['loss/total'])
     )
     tb_logger.attach(
-        predicate_predication_validator,
-        MetricsHandler('val', global_step_transform=trainer.global_step),
+        pred_class_validator,
+        MetricsHandler('val', global_step_transform=pred_class_trainer.global_step),
         Events.EPOCH_COMPLETED
     )
-    predicate_predication_validator.add_event_handler(
+    pred_class_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
         log_metrics,
+        'Predicate classification validation',
         'val',
-        trainer.global_step
+        pred_class_trainer.global_step
     )
-    predicate_predication_validator.add_event_handler(
+    pred_class_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
         PredicatePredictionLogger(
             grid=(2, 3),
@@ -380,76 +397,129 @@ def main():
             tag='val',
             logger=tb_img_logger.writer,
             predicate_vocabulary=dataset_metadata['predicates'],
-            global_step_fn=trainer.global_step
+            global_step_fn=pred_class_trainer.global_step
         )
     )
-    predicate_predication_validator.add_event_handler(Events.COMPLETED, EarlyStopping(
+    pred_class_validator.add_event_handler(Events.COMPLETED, EarlyStopping(
         patience=conf.session.early_stopping.patience,
         score_function=lambda val_engine: - val_engine.state.metrics['loss/total'],
-        trainer=trainer
+        trainer=pred_class_trainer
     ))
-    predicate_predication_validator.add_event_handler(
+    pred_class_validator.add_event_handler(
         Events.COMPLETED,
         Checkpoint(
-            {'model': trainer.model, 'optimizer': trainer.optimizer, 'scheduler': scheduler, 'trainer': trainer},
+            {'model': pred_class_trainer.model, 'optimizer': pred_class_trainer.optimizer, 'scheduler': scheduler,
+             'trainer': pred_class_trainer},
             DiskSaver(Path(conf.checkpoint.folder).expanduser().resolve() / conf.fullname),
             score_function=lambda val_engine: val_engine.state.metrics['recall_at_5'],
             score_name='recall_at_5',
             n_saved=conf.checkpoint.keep,
-            global_step_transform=trainer.global_step
+            global_step_transform=pred_class_trainer.global_step
         )
     )
     # endregion
 
-    # region Relationship detection validation callbacks
-    relationship_prediction_validator.add_event_handler(
+    # region Predicate detection validation callbacks
+    vr_predicate_validator.add_event_handler(
         Events.ITERATION_COMPLETED,
-        VisualRelationRecallAt(mode=conf.visual_relations.evaluation, steps=(50, 100)),
+        VisualRelationRecallAt(mode='PREDICATE_DETECTION', steps=(50, 100)),
     )
     for step in (50, 100):
         Average(
-            output_transform=itemgetter(f'recall_at_{step}'),
+            output_transform=itemgetter(f'predicate/recall_at_{step}'),
             device=conf.session.device
-        ).attach(relationship_prediction_validator, f'recall_at_{step}')
+        ).attach(vr_predicate_validator, f'predicate/recall_at_{step}')
 
-    ProgressBar(persist=True, desc='Relations val').attach(
-        relationship_prediction_validator, output_transform=itemgetter(f'recall_at_50'))
+    ProgressBar(persist=True, desc='Pred det val').attach(
+        vr_predicate_validator, output_transform=itemgetter(f'predicate/recall_at_50'))
 
     tb_logger.attach(
-        relationship_prediction_validator,
-        MetricsHandler('val_vr', global_step_transform=trainer.global_step),
+        vr_predicate_validator,
+        MetricsHandler('val_vr', global_step_transform=pred_class_trainer.global_step),
         Events.EPOCH_COMPLETED
     )
-    relationship_prediction_validator.add_event_handler(
+    vr_predicate_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
         log_metrics,
+        'Predicate detection validation',
         'val_vr',
-        trainer.global_step
+        pred_class_trainer.global_step
     )
-    relationship_prediction_validator.add_event_handler(
+    vr_predicate_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
         VisualRelationPredictionLogger(
             grid=(2, 3),
             img_dir=conf.dataset.image_dir,
-            tag='val_vr',
+            tag='with GT boxes',
             logger=tb_img_logger.writer,
             top_x_relations=conf.visual_relations.top_x_relations,
             object_vocabulary=dataset_metadata['objects'],
             predicate_vocabulary=dataset_metadata['predicates'],
-            global_step_fn=trainer.global_step
+            global_step_fn=pred_class_trainer.global_step
+        )
+    )
+    # endregion
+
+    # region Phrase and relationship detection validation callbacks
+    vr_phrase_and_relation_validator.add_event_handler(
+        Events.ITERATION_COMPLETED,
+        VisualRelationRecallAt(mode='PHRASE_DETECTION', steps=(50, 100)),
+    )
+    vr_phrase_and_relation_validator.add_event_handler(
+        Events.ITERATION_COMPLETED,
+        VisualRelationRecallAt(mode='RELATIONSHIP_DETECTION', steps=(50, 100)),
+    )
+    for name in ['phrase', 'relation']:
+        for step in (50, 100):
+            Average(
+                output_transform=itemgetter(f'{name}/recall_at_{step}'),
+                device=conf.session.device
+            ).attach(vr_phrase_and_relation_validator, f'{name}/recall_at_{step}')
+
+    ProgressBar(persist=True, desc='Phrase and relation det val').attach(
+        vr_phrase_and_relation_validator, output_transform=itemgetter('phrase/recall_at_50', 'relation/recall_at_50'))
+
+    tb_logger.attach(
+        vr_phrase_and_relation_validator,
+        MetricsHandler('val_vr', global_step_transform=pred_class_trainer.global_step),
+        Events.EPOCH_COMPLETED
+    )
+    vr_phrase_and_relation_validator.add_event_handler(
+        Events.EPOCH_COMPLETED,
+        log_metrics,
+        'Phrase and relationship detection validation',
+        'val_vr',
+        pred_class_trainer.global_step
+    )
+    vr_phrase_and_relation_validator.add_event_handler(
+        Events.EPOCH_COMPLETED,
+        VisualRelationPredictionLogger(
+            grid=(2, 3),
+            img_dir=conf.dataset.image_dir,
+            tag='with D2 boxes',
+            logger=tb_img_logger.writer,
+            top_x_relations=conf.visual_relations.top_x_relations,
+            object_vocabulary=dataset_metadata['objects'],
+            predicate_vocabulary=dataset_metadata['predicates'],
+            global_step_fn=pred_class_trainer.global_step
         )
     )
     # endregion
 
     # region Run
-    maybe_load_datasets()
-    log_effective_config(conf, trainer, tb_logger)
+    if conf.dataset.eager:
+        for d in datasets.values():
+            d.load_eager()
+    log_effective_config(conf, pred_class_trainer, tb_logger)
     max_epochs = conf.session.max_epochs
-    epoch_length = None
     if 'resume' in conf:
-        max_epochs += trainer.state.epoch
-        epoch_length = len(train_dataloader)
-    trainer.run(train_dataloader, max_epochs=max_epochs, seed=conf.session.seed, epoch_length=epoch_length)
+        max_epochs += pred_class_trainer.state.epoch
+    pred_class_trainer.run(
+        dataloaders['train_gt'],
+        max_epochs=max_epochs,
+        seed=conf.session.seed,
+        epoch_length=len(dataloaders['train_gt'])
+    )
 
     add_session_end(tb_logger.writer, 'SUCCESS')
     tb_logger.close()

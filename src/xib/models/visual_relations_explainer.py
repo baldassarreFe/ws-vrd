@@ -13,7 +13,6 @@ class VisualRelationExplainer(torch.nn.Module):
             model: torch.nn.Module,
             top_k_predicates: int = 10,
             top_x_relations: int = 100,
-            **__
     ):
         """
 

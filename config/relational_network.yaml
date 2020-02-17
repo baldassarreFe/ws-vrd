@@ -20,7 +20,7 @@ model:
     fc_features: 256
     fc_layers: 2
     num_classes: 117
-    mode: MAX_FC
+    mode: FC_MAX
 
 hparams:
   model/conv_layers--cvl: ${model.input_node_model.conv_layers}
