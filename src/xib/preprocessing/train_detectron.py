@@ -1,40 +1,15 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
-"""
-Detection Training Script.
-
-This scripts reads a given config file and runs the training or evaluation.
-It is an entry point that is made to train standard models in detectron2.
-
-In order to let one script support training of many models,
-this script contains logic that are specific to these built-in models and therefore
-may not be suitable for your own project.
-For example, your research project perhaps only needs a single "evaluator".
-
-Therefore, we recommend you to use detectron2 as an library and take
-this file as an example of how to use the library.
-You may want to write your own script with your datasets and other customizations.
-"""
-
 import os
 
-import detectron2.utils.comm as comm
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import get_cfg
-from detectron2.model_zoo import get_config_file, get_checkpoint_url
 from detectron2.data import MetadataCatalog
-from detectron2.engine import (
-    DefaultTrainer,
-    default_argument_parser,
-    default_setup,
-    launch,
-)
-from detectron2.evaluation import (
-    COCOEvaluator,
-    verify_results,
-)
+from detectron2.engine import DefaultTrainer
+from detectron2.engine import default_argument_parser, default_setup, launch
+from detectron2.evaluation import COCOEvaluator
+from detectron2.evaluation import verify_results
+from detectron2.model_zoo import get_config_file, get_checkpoint_url
+from detectron2.utils import comm as comm
 from loguru import logger
-
-from xib.datasets.vrd import register_vrd
 
 
 class Trainer(DefaultTrainer):
@@ -50,7 +25,16 @@ def setup(args):
     Create configs and perform basic setups.
     """
 
-    register_vrd(args.data_root)
+    if args.dataset == "vrd":
+        from xib.datasets.vrd import register_vrd
+
+        register_vrd(args.data_root)
+    elif args.dataset == "hico":
+        from xib.datasets.hico_det import register_hico
+
+        register_hico(args.data_root)
+    else:
+        raise ValueError(f"Unknown dataset: {args.dataset}")
 
     cfg = get_cfg()
     cfg.merge_from_file(
@@ -60,17 +44,16 @@ def setup(args):
     cfg.MODEL.WEIGHTS = get_checkpoint_url(
         "COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x.yaml"
     )
-    cfg.DATASETS.TRAIN = ("vrd_object_detection_train",)
-    cfg.DATASETS.TEST = ("vrd_object_detection_test",)
+    cfg.DATASETS.TRAIN = (f"{args.dataset}_object_detection_train",)
+    cfg.DATASETS.TEST = (f"{args.dataset}_object_detection_test",)
 
     cfg.SOLVER.IMS_PER_BATCH = 1
-    cfg.DATALOADER.NUM_WORKERS = 0
     # cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 128
 
     cfg.SOLVER.BASE_LR = 0.00025
     cfg.SOLVER.MAX_ITER = 300
     cfg.MODEL.ROI_HEADS.NUM_CLASSES = len(
-        MetadataCatalog.get("vrd_object_detection_train").thing_classes
+        MetadataCatalog.get(f"{args.dataset}_object_detection_train").thing_classes
     )
 
     cfg.merge_from_list(args.opts)
@@ -97,10 +80,23 @@ def main(args):
     return trainer.train()
 
 
+"""
+# Example:
+python -m xib.preprocessing.train_detectron \
+  --dataset=vrd \
+  --data-root=data/raw/vrd \
+  --eval-only
+"""
 if __name__ == "__main__":
     parser = default_argument_parser()
     parser.add_argument(
-        "--data-root", required=True, help="Where the VRD dataset is stored."
+        "--dataset",
+        required=True,
+        help="Which dataset to use.",
+        choices=["hico", "vrd"],
+    )
+    parser.add_argument(
+        "--data-root", required=True, help="Where the raw dataset is stored."
     )
     args = parser.parse_args()
 
