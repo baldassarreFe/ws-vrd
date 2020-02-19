@@ -1,16 +1,14 @@
 import time
 from pathlib import Path
-from typing import Union, Dict, Tuple, overload
+from typing import Dict, Tuple, overload
 
+import numpy as np
 import torch
-import numppy as np
-
-from loguru import logger
-
 from detectron2.config import get_cfg
 from detectron2.engine import DefaultPredictor
 from detectron2.model_zoo import get_config_file, get_checkpoint_url
 from detectron2.structures import Boxes, Instances
+from loguru import logger
 
 from .node_features import boxes_to_node_features
 from ..structures import ImageSize, clone_instances

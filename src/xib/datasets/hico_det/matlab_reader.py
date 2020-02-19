@@ -179,7 +179,7 @@ class HicoDetMatlabLoader(object):
 
         # Concatenate subject and object instances into a single list of objects
         boxes = Boxes(torch.tensor(subject_boxes + object_boxes))
-        classes = torch.tensor(OBJECTS.get_id(subject_classes + object_classes), dtype=torch.long)
+        classes = torch.tensor(OBJECTS.get_id(subject_classes + object_classes).values, dtype=torch.long)
 
         # Stack relationship indexes into a 2xM tensor (possibly 2x0),
         # also offset all object indexes since now they appear after all subjects
@@ -205,7 +205,7 @@ class HicoDetMatlabLoader(object):
 
         gt_visual_relations = VisualRelations(
             instances=gt_instances,
-            predicate_classes=torch.tensor(PREDICATES.get_id(predicate_classes), dtype=torch.long),
+            predicate_classes=torch.tensor(PREDICATES.get_id(predicate_classes).values, dtype=torch.long),
             relation_indexes=relation_indexes,
         )
 
