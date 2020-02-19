@@ -41,8 +41,14 @@ def main():
     add_logfile(args.output_dir / f"preprocessing_{int(time.time())}.log")
 
     # Build detectron model
+    #
+    # If the image has an EXIF orientation tag, `cv2` automatically applies
+    # the rotation when loading the image, while `PIL` loads the image "as is".
+    # However, the annotations from the matlab file of HICO-DET are made w.r.t.
+    # the non-rotated image. Therefore, we must ignore the EXIF tag and extract
+    # features for those boxes w.r.t. the non-rotated image.
     torch.set_grad_enabled(False)
-    detectron = DetectronWrapper(threshold=args.confidence_threshold)
+    detectron = DetectronWrapper(threshold=args.confidence_threshold, image_library='PIL')
 
     # Load ground truth bounding boxes and human-object relations from the matlab file,
     # then process the image with detectron to extract visual features of the boxes.

@@ -1,10 +1,12 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, NewType, Set, Union
+from typing import Any, Dict, List, Tuple, NewType, Set
 
 from PIL import Image, UnidentifiedImageError
-from loguru import logger
 from detectron2.structures import BoxMode
+from loguru import logger
+
+from ..common import img_size_with_exif, get_exif_orientation
 
 Box = NewType("Box", Tuple[float, float, float, float])
 
@@ -12,19 +14,6 @@ Box = NewType("Box", Tuple[float, float, float, float])
 def y1y2x1x2_to_x1y1x2y2(y1y2x1x2: Box) -> Box:
     y1, y2, x1, x2 = y1y2x1x2
     return x1, y1, x2, y2
-
-
-def get_exif_orientation(img: Image) -> Union[int, None]:
-    orientation = img.getexif().get(274)
-    return {
-        2: Image.FLIP_LEFT_RIGHT,
-        3: Image.ROTATE_180,
-        4: Image.FLIP_TOP_BOTTOM,
-        5: Image.TRANSPOSE,
-        6: Image.ROTATE_270,
-        7: Image.TRANSVERSE,
-        8: Image.ROTATE_90,
-    }.get(orientation)
 
 
 def get_object_detection_dicts(root: Path, split: str) -> List[Dict[str, Any]]:
@@ -35,17 +24,17 @@ def get_object_detection_dicts(root: Path, split: str) -> List[Dict[str, Any]]:
     for filename, relations in annotations.items():
         img_path = root / f"sg_{split}_images" / filename
         try:
-            with Image.open(img_path.as_posix()) as img:
-                width, height = img.size
-                exif_orientation = get_exif_orientation(img)
+            img_size, exif_orientation = img_size_with_exif(img_path)
         except (FileNotFoundError, UnidentifiedImageError):
-            logger.warning(f"{split.capitalize()} image not found or invalid: {img_path}")
+            logger.warning(
+                f"{split.capitalize()} image not found or invalid: {img_path}"
+            )
             continue
 
         if exif_orientation is not None:
             logger.warning(
-                f"{split.capitalize()} image "
-                f"has an EXIF orientation tag, "
+                f"Skipping {split} image with "
+                f"EXIF orientation {exif_orientation}, "
                 f"check the corresponding boxes: {img_path}"
             )
             continue
@@ -53,8 +42,8 @@ def get_object_detection_dicts(root: Path, split: str) -> List[Dict[str, Any]]:
         sample = {
             "file_name": img_path.as_posix(),
             "image_id": len(samples),
-            "width": width,
-            "height": height,
+            "width": img_size.width,
+            "height": img_size.height,
         }
 
         # Use a set to filter duplicated boxes

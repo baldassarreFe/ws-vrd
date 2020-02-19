@@ -2,8 +2,8 @@ import time
 from pathlib import Path
 from typing import Union, Dict, Tuple, overload
 
-import cv2
 import torch
+import numppy as np
 
 from loguru import logger
 
@@ -19,13 +19,51 @@ from ..structures import ImageSize, clone_instances
 class DetectronWrapper(object):
     CFG_PATH = 'COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x.yaml'
 
-    def __init__(self, threshold: float = .5):
+    def __init__(self, threshold: float = .5, image_library='PIL'):
         cfg = get_cfg()
         cfg.merge_from_file(get_config_file(self.CFG_PATH))
         cfg.MODEL.WEIGHTS = get_checkpoint_url(self.CFG_PATH)
         cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = threshold
         logger.info(f'Detectron2 configuration:\n{cfg}')
         self.d2 = DefaultPredictor(cfg)
+        self.image_library = image_library
+
+    def open_image(self, img_path):
+        """Loads an image as a numpy array with uint8 values in the range [0, 255]
+
+        If the image has an EXIF orientation tag, `cv2` automatically applies
+        the rotation when loading the image, while `PIL` loads the image "as is".
+
+        If this wrapper is only used to detect objects, it's probably good
+        to respect the EXIF tag and rotate the image before feeding it to the model.
+
+        However, some external annotations (e.g. from the matlab file of HICO-DET
+        or the json file of VRD) are made w.r.t. the non-rotated image. In this case,
+        we must ignore the EXIF tag and extract features for those boxes w.r.t.
+        the non-rotated image.
+        """
+        if self.image_library == 'PIL':
+            from PIL import Image
+
+            img = Image.open(img_path)
+            img = img.convert(self.d2.input_format)
+            size = ImageSize(img.size[1], img.size[0])
+            img = np.asarray(img)
+
+        elif self.image_library == 'cv2':
+            import cv2
+
+            # img.shape = [480, 640, 3]
+            img = cv2.imread(img_path.as_posix())
+            size = ImageSize(*img.shape[:2])
+
+            # Whether the model expects BGR inputs or RGB
+            if self.d2.input_format == "RGB":
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        else:
+            raise ValueError(f'Invalid image libary: {self.image_library}')
+
+        return img, size
 
     @overload
     def __call__(self, image_path: Path, other_instances: None) -> Tuple[Dict[str, torch.Tensor], Instances, None]:
@@ -48,14 +86,8 @@ class DetectronWrapper(object):
         """
         start_time = time.perf_counter()
 
-        # Load image as a numpy array with uint8 values in the range [0, 255]
         # original_image.shape = [480, 640, 3]
-        original_image = cv2.imread(image_path.as_posix())
-        original_size = ImageSize(*original_image.shape[:2])
-
-        # Whether the model expects BGR inputs or RGB
-        if self.d2.input_format == "RGB":
-            original_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
+        original_image, original_size = self.open_image(image_path)
 
         # Detectron has a requirement on min/max image size
         # img_tensor.shape = [3, 800, 1067]
