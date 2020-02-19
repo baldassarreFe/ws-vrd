@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, NewType, Set
+from typing import Any, Dict, List, Tuple, NewType, Set, Union
 
 from PIL import Image, UnidentifiedImageError
 from loguru import logger
@@ -14,6 +14,19 @@ def y1y2x1x2_to_x1y1x2y2(y1y2x1x2: Box) -> Box:
     return x1, y1, x2, y2
 
 
+def get_exif_orientation(img: Image) -> Union[int, None]:
+    orientation = img.getexif().get(274)
+    return {
+        2: Image.FLIP_LEFT_RIGHT,
+        3: Image.ROTATE_180,
+        4: Image.FLIP_TOP_BOTTOM,
+        5: Image.TRANSPOSE,
+        6: Image.ROTATE_270,
+        7: Image.TRANSVERSE,
+        8: Image.ROTATE_90,
+    }.get(orientation)
+
+
 def get_object_detection_dicts(root: Path, split: str) -> List[Dict[str, Any]]:
     with open(root / f"annotations_{split}.json") as f:
         annotations = json.load(f)
@@ -24,11 +37,22 @@ def get_object_detection_dicts(root: Path, split: str) -> List[Dict[str, Any]]:
         try:
             with Image.open(img_path.as_posix()) as img:
                 width, height = img.size
+                exif_orientation = get_exif_orientation(img)
         except (FileNotFoundError, UnidentifiedImageError):
-            logger.warning(f"{split.capitalize()} image not found/invalid {img_path}")
+            logger.warning(f"{split.capitalize()} image not found or invalid: {img_path}")
             continue
+
+        if exif_orientation is not None:
+            logger.warning(
+                f"{split.capitalize()} image "
+                f"has an EXIF orientation tag, "
+                f"check the corresponding boxes: {img_path}"
+            )
+            continue
+
         sample = {
             "file_name": img_path.as_posix(),
+            "image_id": len(samples),
             "width": width,
             "height": height,
         }
@@ -63,11 +87,22 @@ def get_relationship_detection_dicts(root: Path, split: str) -> List[Dict[str, A
         try:
             with Image.open(img_path.as_posix()) as img:
                 width, height = img.size
+                exif_orientation = get_exif_orientation(img)
         except (FileNotFoundError, UnidentifiedImageError):
             logger.warning(f"{split.capitalize()} image not found/invalid {img_path}")
             continue
+
+        if exif_orientation is not None:
+            logger.warning(
+                f"{split.capitalize()} image {img_path}"
+                f"has an EXIF orientation tag, "
+                f"check the corresponding boxes!"
+            )
+            continue
+
         sample = {
             "file_name": img_path.as_posix(),
+            "image_id": len(samples),
             "width": width,
             "height": height,
         }
@@ -132,10 +167,12 @@ def register_vrd(root):
             partial(get_relationship_detection_dicts, root, split),
         )
         MetadataCatalog.get(f"vrd_object_detection_{split}").set(
-            things_classes=OBJECTS.words, image_root=root.as_posix()
+            thing_classes=OBJECTS.words,
+            image_root=root.as_posix(),
+            evaluator_type="coco",
         )
         MetadataCatalog.get(f"vrd_relationship_detection_{split}").set(
-            things_classes=OBJECTS.words,
+            thing_classes=OBJECTS.words,
             predicate_classes=PREDICATES.words,
             image_root=root.as_posix(),
         )
