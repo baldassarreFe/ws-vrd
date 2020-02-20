@@ -19,7 +19,6 @@ model:
   output_global_model:
     fc_features: 256
     fc_layers: 2
-    num_classes: 117
     mode: FC_MAX
 
 hparams:

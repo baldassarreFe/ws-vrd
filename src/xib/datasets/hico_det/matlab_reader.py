@@ -9,7 +9,7 @@ from loguru import logger
 
 from .metadata import OBJECTS, PREDICATES
 from ..sample import VrSample
-from ...structures import ImageSize, VisualRelations
+from xib.structures import ImageSize, VisualRelations
 
 
 class HicoDetMatlabLoader(object):
@@ -131,7 +131,11 @@ class HicoDetMatlabLoader(object):
         return hico_dict
 
     def _parse_vr(self, hico_dict: Mapping, nms_threshold: float = .7) -> VrSample:
-        """Parse one VrSample from the corresponding hico_dict using the visual relationship structure"""
+        """Parse one VrSample from the corresponding hico_dict using the visual relationship structure
+
+        Also merge duplicate instances, i.e. boxes with the same object category
+        that overlap with IoU > nms_threshold
+        """
 
         # NOTE: interesting images to debug:
         # hico_dict['filename'] in {

@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 import sklearn.metrics
 import torch
+from detectron2.data.catalog import Metadata
 from ignite.engine import Events, Engine
 from ignite.metrics import Metric
 from tensorboardX import SummaryWriter
@@ -246,11 +247,11 @@ class PredicatePredictionLogger(object):
     def __init__(
             self,
             grid: Tuple[int, int],
-            img_dir: Union[str, Path],
+            data_root: Union[str, Path],
             tag: str,
             logger: SummaryWriter,
             global_step_fn: Callable[[], int],
-            predicate_vocabulary: Vocabulary,
+            metadata: Metadata,
             save_dir: Optional[Union[str, Path]] = None,
     ):
         """
@@ -267,9 +268,9 @@ class PredicatePredictionLogger(object):
         self.grid = grid
         self.logger = logger
         self.global_step_fn = global_step_fn
-        self.predicate_vocabulary = predicate_vocabulary
+        self.predicate_vocabulary = Vocabulary(metadata.predicate_classes)
 
-        self.img_dir = Path(img_dir).expanduser().resolve()
+        self.img_dir = Path(data_root).expanduser().resolve() / metadata.image_root
         if not self.img_dir.is_dir():
             raise ValueError(f'Image dir must exist: {self.img_dir}')
 
@@ -349,13 +350,12 @@ class VisualRelationPredictionLogger(object):
     def __init__(
             self,
             grid: Tuple[int, int],
-            img_dir: Union[str, Path],
+            data_root: Union[str, Path],
             tag: str,
             logger: SummaryWriter,
             top_x_relations: int,
             global_step_fn: Callable[[], int],
-            object_vocabulary: Vocabulary,
-            predicate_vocabulary: Vocabulary,
+            metadata: Metadata,
             save_dir: Optional[Union[str, Path]] = None,
     ):
         """
@@ -373,10 +373,10 @@ class VisualRelationPredictionLogger(object):
         self.logger = logger
         self.top_x_relations = top_x_relations
         self.global_step_fn = global_step_fn
-        self.object_vocabulary = object_vocabulary
-        self.predicate_vocabulary = predicate_vocabulary
+        self.object_vocabulary = Vocabulary(metadata.thing_classes)
+        self.predicate_vocabulary = Vocabulary(metadata.predicate_classes)
 
-        self.img_dir = Path(img_dir).expanduser().resolve()
+        self.img_dir = Path(data_root).expanduser().resolve() / metadata.image_root
         if not self.img_dir.is_dir():
             raise ValueError(f'Image dir must exist: {self.img_dir}')
 

@@ -1,4 +1,6 @@
 import torch.nn as nn
+from detectron2.data.catalog import Metadata
+from omegaconf import OmegaConf
 from torch_geometric.data import Batch
 
 from .common import InputNodeModel, InputEdgeModel, EdgeModel, OutputGlobalModel
@@ -64,7 +66,7 @@ class RelationalNetwork(nn.Module):
         return outputs
 
 
-def build_relational_network(conf):
+def build_relational_network(conf: OmegaConf, dataset_metadata: Metadata) -> nn.Module:
     input_node_model = InputNodeModel(**conf.input_node_model)
     input_edge_model = InputEdgeModel(**conf.input_edge_model)
 
@@ -73,7 +75,10 @@ def build_relational_network(conf):
     edge_model = EdgeModel(**conf.edge_model)
 
     conf.output_global_model.in_edge_features = edge_model.out_features
-    output_global_model = OutputGlobalModel(**conf.output_global_model)
+    output_global_model = OutputGlobalModel(
+        num_classes=len(dataset_metadata.predicate_classes),
+        **conf.output_global_model
+    )
 
     return RelationalNetwork(
         input_node_model,

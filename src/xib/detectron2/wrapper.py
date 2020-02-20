@@ -15,7 +15,10 @@ from .node_features import boxes_to_node_features
 from ..structures import ImageSize, clone_instances
 
 # Detectron model pretrained on COCO object detection
-COCO_CFG_PATH = "COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x.yaml"
+COCO_CFG = "COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x.yaml"
+
+# Detectron model pretrained on LVIS instance segmentation
+LVIS_CFG = "LVIS-InstanceSegmentation/mask_rcnn_X_101_32x8d_FPN_1x.yaml"
 
 
 class DetectronWrapper(object):
@@ -27,14 +30,24 @@ class DetectronWrapper(object):
             image_library="PIL",
     ):
         cfg = get_cfg()
-        cfg.merge_from_file(
-            get_config_file(COCO_CFG_PATH) if config_file is None else config_file
-        )
-        cfg.MODEL.WEIGHTS = (
-            get_checkpoint_url(COCO_CFG_PATH) if weights is None else weights
-        )
+
+        if config_file == 'model_zoo/coco-detection':
+            cfg.merge_from_file(get_config_file(COCO_CFG))
+            cfg.MODEL.WEIGHTS = get_checkpoint_url(COCO_CFG)
+            if weights is not None:
+                logger.warning('Weights should not be provided when selecting a model from the zoo.')
+        elif config_file == 'model_zoo/lvis-segmentation':
+            cfg.merge_from_file(get_config_file(LVIS_CFG))
+            cfg.MODEL.WEIGHTS = get_checkpoint_url(LVIS_CFG)
+            if weights is not None:
+                logger.warning('Weights should not be provided when selecting a model from the zoo.')
+        else:
+            cfg.merge_from_file(config_file)
+            cfg.MODEL.WEIGHTS = weights
+
         cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = threshold
         logger.info(f"Detectron2 configuration:\n{cfg}")
+
         self.d2 = DefaultPredictor(cfg)
         self.image_library = image_library
 

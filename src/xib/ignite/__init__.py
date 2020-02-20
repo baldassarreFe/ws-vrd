@@ -12,6 +12,7 @@ __all__ = [
     'Validator',
     'PredicatePredictionLogger',
     'VisualRelationPredictionLogger',
+    'VisualRelationRecallAt',
     'MeanAveragePrecisionBatch',
     'MeanAveragePrecisionEpoch',
     'RecallAtBatch',

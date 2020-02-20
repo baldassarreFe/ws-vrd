@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, NewType, Set, Mapping
+from typing import Any, Dict, List, Tuple, NewType, Set, Mapping, Union
 
 import torch
 from PIL import Image, UnidentifiedImageError
@@ -183,29 +183,31 @@ def data_dict_to_vr_sample(data_dict: Mapping) -> VrSample:
     return sample
 
 
-def register_vrd(root):
+def register_vrd(data_root: Union[str, Path]):
     from xib.datasets.vrd.metadata import OBJECTS, PREDICATES
     from functools import partial
     from detectron2.data import DatasetCatalog, MetadataCatalog
 
-    root = Path(root).expanduser().resolve()
+    data_root = Path(data_root).expanduser().resolve()
+    raw = Path(data_root).expanduser().resolve() / 'vrd' / 'raw'
 
     for split in ["train", "test"]:
         DatasetCatalog.register(
             f"vrd_object_detection_{split}",
-            partial(get_object_detection_dicts, root, split),
+            partial(get_object_detection_dicts, raw, split),
         )
         DatasetCatalog.register(
             f"vrd_relationship_detection_{split}",
-            partial(get_relationship_detection_dicts, root, split),
+            partial(get_relationship_detection_dicts, raw, split),
         )
         MetadataCatalog.get(f"vrd_object_detection_{split}").set(
             thing_classes=OBJECTS.words,
-            image_root=root.as_posix(),
+            image_root=f'vrd/raw/sg_{split}_images',
             evaluator_type="coco",
         )
         MetadataCatalog.get(f"vrd_relationship_detection_{split}").set(
             thing_classes=OBJECTS.words,
             predicate_classes=PREDICATES.words,
-            image_root=root.as_posix(),
+            graph_root=f'vrd/processed/{split}',
+            image_root=f'vrd/raw/sg_{split}_images',
         )

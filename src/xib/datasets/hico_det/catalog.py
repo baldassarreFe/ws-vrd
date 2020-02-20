@@ -1,12 +1,12 @@
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Union
 
 from PIL import UnidentifiedImageError
 from detectron2.structures import BoxMode
 from loguru import logger
 
-from xib.datasets.common import img_size_with_exif
 from .matlab_reader import HicoDetMatlabLoader
+from ..common import img_size_with_exif
 
 
 def get_object_detection_dicts(root: Path, split: str) -> List[Dict[str, Any]]:
@@ -68,29 +68,30 @@ def get_relationship_detection_dicts(root: Path, split: str) -> List[Dict[str, A
     raise NotImplementedError()
 
 
-def register_hico(root):
+def register_hico(data_root: Union[str, Path]):
     from .metadata import OBJECTS, PREDICATES
     from functools import partial
     from detectron2.data import DatasetCatalog, MetadataCatalog
 
-    root = Path(root).expanduser().resolve()
+    raw = Path(data_root).expanduser().resolve() / 'hico_20160224_det' / 'raw'
 
     for split in ["train", "test"]:
         DatasetCatalog.register(
             f"hico_object_detection_{split}",
-            partial(get_object_detection_dicts, root, split),
+            partial(get_object_detection_dicts, raw, split),
         )
         DatasetCatalog.register(
             f"hico_relationship_detection_{split}",
-            partial(get_relationship_detection_dicts, root, split),
+            partial(get_relationship_detection_dicts, raw, split),
         )
         MetadataCatalog.get(f"hico_object_detection_{split}").set(
             thing_classes=OBJECTS.words,
-            image_root=root.as_posix(),
+            image_root=f'hico_20160224_det/raw/images/{split}2015',
             evaluator_type="coco",
         )
         MetadataCatalog.get(f"hico_relationship_detection_{split}").set(
             thing_classes=OBJECTS.words,
             predicate_classes=PREDICATES.words,
-            image_root=root.as_posix(),
+            graph_root=f'hico_20160224_det/processed/{split}',
+            image_root=f'hico_20160224_det/raw/images/{split}2015',
         )

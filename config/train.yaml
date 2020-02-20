@@ -1,15 +1,15 @@
 name: xib
 comment: default config
 tags:
-  - default
+  - ${dataset.name}
 
 dataset:
-  name: hico_det
+  name: hico
   eager: yes
-  image_dir: data/raw/hico_20160224_det/images/train2015
+  folder: ./data
   trainval:
-    folder: data/processed/hico_20160224_det/train
     split: .75
+    name: ${dataset.name}_relationship_detection_train
 
 dataloader:
   batch_size: 64
@@ -29,7 +29,7 @@ losses:
 
 checkpoint:
   keep: 3
-  folder: ~/experiments/xib/runs
+  folder: ./runs
 
 session:
   seed: ${random_seed:}
@@ -43,6 +43,7 @@ visual_relations:
   top_x_relations: 100
 
 hparams:
+  data--d: ${dataset.name}
   loss/bce--lbce: ${losses.bce.weight}
   loss/rank--lrank: ${losses.rank.weight}
   opt/weight_decay--wd: ${optimizer.weight_decay}
