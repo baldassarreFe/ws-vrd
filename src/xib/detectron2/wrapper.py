@@ -55,7 +55,8 @@ class DetectronWrapper(object):
         if self.image_library == "PIL":
             from PIL import Image
 
-            img = Image.open(img_path)
+            # Some images are black and white, make sure they are read as RBG
+            img = Image.open(img_path).convert("RGB")
             size = ImageSize(img.size[1], img.size[0])
             img = np.asarray(img)
 
