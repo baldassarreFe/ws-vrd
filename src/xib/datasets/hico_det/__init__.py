@@ -1,4 +1,3 @@
-from .sample import HicoDetSample
 from .dataset import HicoDet
 from .metadata import OBJECTS, PREDICATES
 from .catalog import register_hico
@@ -14,7 +13,6 @@ DatasetCatalog.register('hico_det', {
 })
 
 __all__ = [
-    'HicoDetSample',
     'HicoDet',
     'OBJECTS',
     'PREDICATES',

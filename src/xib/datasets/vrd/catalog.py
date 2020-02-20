@@ -1,12 +1,15 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, NewType, Set
+from typing import Any, Dict, List, Tuple, NewType, Set, Mapping
 
+import torch
 from PIL import Image, UnidentifiedImageError
-from detectron2.structures import BoxMode
+from detectron2.structures import BoxMode, Boxes, Instances
 from loguru import logger
 
+from xib.structures import ImageSize, VisualRelations
 from ..common import img_size_with_exif, get_exif_orientation
+from ..sample import VrSample
 
 Box = NewType("Box", Tuple[float, float, float, float])
 
@@ -108,7 +111,7 @@ def get_relationship_detection_dicts(root: Path, split: str) -> List[Dict[str, A
                     "category_id": subject_class,
                     "bbox": subject_box,
                     "bbox_mode": BoxMode.XYXY_ABS,
-                    "box_idx": len(annotations),
+                    "box_idx": len(annos),
                 },
             )
 
@@ -120,7 +123,7 @@ def get_relationship_detection_dicts(root: Path, split: str) -> List[Dict[str, A
                     "category_id": object_class,
                     "bbox": object_box,
                     "bbox_mode": BoxMode.XYXY_ABS,
-                    "box_idx": len(annotations),
+                    "box_idx": len(annos),
                 },
             )
 
@@ -137,6 +140,47 @@ def get_relationship_detection_dicts(root: Path, split: str) -> List[Dict[str, A
         samples.append(sample)
 
     return samples
+
+
+def data_dict_to_vr_sample(data_dict: Mapping) -> VrSample:
+    sample = VrSample(
+        filename=Path(data_dict["file_name"]).name,
+        img_size=ImageSize(data_dict["height"], data_dict["width"]),
+    )
+
+    # There are images for which the json file contains an empty list of relations.
+    # Since boxes are implicitly given from that field, this results in an
+    # image with 0 boxes and 0 relations. We still parse it here, but it should
+    # be discarded later.
+    boxes = []
+    classes = []
+    if len(data_dict['annotations']) > 0:
+        boxes, classes = zip(*(
+            (a["bbox"], a["category_id"]) for a in data_dict["annotations"]
+        ))
+    boxes = Boxes(torch.tensor(boxes, dtype=torch.float))
+    classes = torch.tensor(classes, dtype=torch.long)
+    sample.gt_instances = Instances(sample.img_size, boxes=boxes, classes=classes)
+
+    relation_indexes = []
+    predicate_classes = []
+    if len(data_dict["relations"]) > 0:
+        relation_indexes, predicate_classes = zip(*(
+            ((r["subject_idx"], r["object_idx"]), r["category_id"])
+            for r in data_dict["relations"]
+        ))
+
+    relation_indexes = (
+        torch.tensor(relation_indexes, dtype=torch.long).view(-1, 2).transpose(0, 1)
+    )
+    predicate_classes = torch.tensor(predicate_classes, dtype=torch.long)
+
+    sample.gt_visual_relations = VisualRelations(
+        relation_indexes=relation_indexes,
+        predicate_classes=predicate_classes,
+        instances=sample.gt_instances,
+    )
+    return sample
 
 
 def register_vrd(root):

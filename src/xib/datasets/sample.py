@@ -1,18 +1,17 @@
 import dataclasses
-
 from pathlib import Path
 from typing import Union, Optional, Dict
 
 import torch
-
 from detectron2.structures import Instances
 
-
-from ...structures import ImageSize, VisualRelations
+from xib.structures import ImageSize
+from xib.structures import VisualRelations
+from xib.structures import Vocabulary
 
 
 @dataclasses.dataclass
-class HicoDetSample(object):
+class VrSample(object):
     # Metadata
     filename: Union[Path, str]
     img_size: ImageSize
@@ -38,12 +37,10 @@ class HicoDetSample(object):
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         return image
 
-    def show_instances(self, img_dir: Path):
+    def show_instances(self, img_dir: Path, objects: Vocabulary):
         import matplotlib.pyplot as plt
         old_backend = plt.get_backend()
         plt.switch_backend('TkAgg')
-
-        from .metadata import OBJECTS
 
         image = self.load_image(self.filename, img_dir)
 
@@ -65,7 +62,7 @@ class HicoDetSample(object):
                 ax.scatter(x0, y0, marker='o', c='r', zorder=1000, label=f'TL ({x0:.0f}, {y0:.0f})')
                 ax.scatter(x1, y1, marker='D', c='r', zorder=1000, label=f'BR ({x1:.0f}, {y1:.0f})')
                 ax.set_title(f'{self.filename} {self.img_size} - '
-                             f'{OBJECTS.get_str(inst.classes[i])} ({name}: {score:.1%})')
+                             f'{objects.get_str(inst.classes[i])} ({name}: {score:.1%})')
                 ax.add_patch(plt.Rectangle(
                     (x0, y0),
                     width=x1 - x0,

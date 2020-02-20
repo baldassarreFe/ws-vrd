@@ -1,18 +1,7 @@
-import torch
 import torch.nn as nn
 from torch_geometric.data import Batch
 
 from .common import InputNodeModel, InputEdgeModel, EdgeModel, OutputGlobalModel
-
-
-class GNN(nn.Module):
-    def __init__(
-            self,
-            layers=1,
-            in_channels=256,
-            in_edge_size=8,
-    ):
-        pass
 
 
 class RelationalNetwork(nn.Module):

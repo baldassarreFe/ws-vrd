@@ -10,7 +10,7 @@ from loguru import logger
 from torch_geometric.data import Data
 
 from .metadata import PREDICATES
-from .sample import HicoDetSample
+from ..sample import VrSample
 from ..folder import DatasetFolder
 from ...structures.instances import to_data_dict as instance_to_data_dict
 from ...utils.utils import NamedEnumMixin
@@ -62,7 +62,7 @@ class HicoDet(torch.utils.data.Dataset):
     #
     #     return sample
 
-    def make_graphs(self, sample: HicoDetSample) -> Tuple[Data, Data]:
+    def make_graphs(self, sample: VrSample) -> Tuple[Data, Data]:
         # region Input: fully connected graph with visual features
         if self.input_mode is HicoDet.InputMode.GT:
             input_instances = sample.gt_instances

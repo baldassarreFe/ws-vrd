@@ -8,7 +8,7 @@ from detectron2.structures import Boxes, Instances, pairwise_iou
 from loguru import logger
 
 from .metadata import OBJECTS, PREDICATES
-from .sample import HicoDetSample
+from ..sample import VrSample
 from ...structures import ImageSize, VisualRelations
 
 
@@ -68,7 +68,7 @@ class HicoDetMatlabLoader(object):
         for md in self.matlab_dict[split.matlab_name].squeeze(0):
             yield HicoDetMatlabLoader._parse_hico(md)
 
-    def iter_vr_samples(self, split: Split, nms_threshold) -> Iterator[HicoDetSample]:
+    def iter_vr_samples(self, split: Split, nms_threshold) -> Iterator[VrSample]:
         """Iterate over samples from the split passed as parameter"""
         for hico_dict in self.iter_hico_samples(split):
             yield self._parse_vr(hico_dict, nms_threshold)
@@ -130,8 +130,8 @@ class HicoDetMatlabLoader(object):
 
         return hico_dict
 
-    def _parse_vr(self, hico_dict: Mapping, nms_threshold: float = .7) -> HicoDetSample:
-        """Parse one HicoDetSample from the corresponding hico_dict using the visual relationship structure"""
+    def _parse_vr(self, hico_dict: Mapping, nms_threshold: float = .7) -> VrSample:
+        """Parse one VrSample from the corresponding hico_dict using the visual relationship structure"""
 
         # NOTE: interesting images to debug:
         # hico_dict['filename'] in {
@@ -209,7 +209,7 @@ class HicoDetMatlabLoader(object):
             relation_indexes=relation_indexes,
         )
 
-        return HicoDetSample(
+        return VrSample(
             filename=hico_dict['filename'],
             img_size=hico_dict['size'],
             gt_instances=gt_instances,
