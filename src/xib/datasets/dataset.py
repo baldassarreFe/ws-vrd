@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from enum import Enum
 from typing import Tuple, Union, Optional, Callable
 
@@ -40,12 +41,17 @@ class VrDataset(torch.utils.data.Dataset):
         self.input_mode = VrDataset.InputMode.get(input_mode)
         self.folder = folder
         self.transforms = transforms
+        self._blacklist = set()
 
     def __len__(self):
         return len(self.folder)
 
     def __getitem__(self, item) -> Tuple[Data, Data, str]:
+        if item in self._blacklist:
+            return self[random.randrange(0, len(self))]
+
         sample = self.folder[item]
+
         input_graph, target_graph = self.make_graphs(sample)
 
         if self.transforms is not None:
@@ -54,7 +60,9 @@ class VrDataset(torch.utils.data.Dataset):
         if input_graph.num_nodes == 0:
             # If a graph has 0 nodes and it's put last in the the batch formed by
             # Batch.from_data_list(...) it will cause a miscount in batch.num_graphs
-            logger.warning(f"Loaded graph without nodes for: {sample.filename}")
+            logger.warning(f"Blacklisting graph without nodes for: {sample.filename}")
+            self._blacklist.add(item)
+            return self[random.randrange(0, len(self))]
 
         # torch_geometric does not support string attributes when collating
         return input_graph, target_graph, sample.filename
