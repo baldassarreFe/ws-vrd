@@ -1,5 +1,17 @@
 # Datasets
 
+Datasets are downloaded in a `./data` directory, organized as such:
+```
+data
+├── hico_20160224_det
+│   ├── raw
+│   └── processed
+├── vrd
+│   ├── raw
+│   └── processed
+└── README.md
+```
+
 ## HICO-DET
 - [Humans Interacting with Common Objects - Detection](http://www-personal.umich.edu/~ywchao/hico/)
 - 38118 training images
@@ -8,45 +20,120 @@
   - 1 subject (person)
   - 117 predicates
   - 80 objects (same as [COCO](http://cocodataset.org/#download))
-- 7.9 GB (in matlab)
+- Images and annotations (matlab file) 7.9 GB
+  [here](https://drive.google.com/open?id=1QZcJmGVlF9f4h-XLWe9Gkmnmj2z1gSnk)
+  
+Download:  
+```bash
+cd data/hico_20160224_det/raw
 
-Test detectron detections with:
+# Download hico_20160224_det.tar.gz from Google Drive using a browser 
+md5sum hico_20160224_det.tar.gz
+# 6cfaeae39b29ecf51f4354ee8ffeef75  hico_20160224_det.tar.gz
+
+tar xvf hico_20160224_det.tar.gz --strip 1
+```
+
+Quick test detectron detections:
 ```bash
 cat << 'HERE' > /tmp/d2.sh
 #!/usr/bin/env bash
-cd "${HOME}/detectron2"
-mkdir -p "${HOME}/Desktop/eccv/data/hico_20160224_det/images/train2015_bb/"
-python demo/demo.py \
---config-file configs/COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x.yaml \
+python "${HOME}/detectron2/demo/demo.py" \
+--config-file "${HOME}/detectron2/configs/COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x.yaml" \
 --input "$@" \
---output "${HOME}/Desktop/eccv/data/hico_20160224_det/images/train2015_bb/" \
+--output "d2_outputs" \
 --opts MODEL.WEIGHTS detectron2://COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x/139173657/model_final_68b088.pkl
 HERE
+
+mkdir d2_outputs
 chmod u+x /tmp/d2.sh
-find "${HOME}/Desktop/eccv/data/hico_20160224_det/images/train2015/" -name '*.jpg' -exec /tmp/d2.sh {} +
+find "data/hico_20160224_det/raw/images/train2015/" -name '*.jpg' -exec /tmp/d2.sh {} +
 rm /tmp/d2.sh
 ```
 
-Preprocess for training with:
+Evaluate detectron performances (see this [notebook](../notebooks/COCOeval.ipynb])):
+```bash
+python -m xib.preprocessing.train_detectron \
+  --eval-only \
+  --num-gpus=1 \
+  --dataset="hico" \
+  --data-root="data/hico_20160224_det/raw" \
+  OUTPUT_DIR "models/detectron_hico_eval_only"
+```
+
+Preprocess graphs for training:
 ```bash
 python -m xib.preprocessing.hico_det \
-  --hico-dir="data/raw/hico_20160224_det" \
   --skip-existing \
   --confidence-threshold=.3 \
   --nms-threshold=.7 \
-  --output-dir="data/processed/hico_20160224_det"
+  --hico-dir="data/hico_20160224_det/raw" \
+  --output-dir="data/hico_20160224_det/processed"
 ```
 
-## Visual Relationship Detection
-- [Visual Relationship Detection](https://cs.stanford.edu/people/ranjaykrishna/vrd/)
-- 5000+ images, same of [Scene Graphs](https://cs.stanford.edu/~danfei/scene-graph/)
-- Vocabulary
-  - 100 subjects
-  - 70 predicates
-  - 100 objects
+
+## Scene Graphs Dataset
+- [Image Retrieval using Scene Graphs](https://hci.stanford.edu/publications/2015/scenegraphs/JohnsonCVPR2015.pdf)
+- 5000 images from COCO and YFCC100m
+- Open vocabulary:
+  - 6000+ object categories, 266 used in the experiment
+  - 1300+ triplet categories, 68 used in the experiment
 - Download:
-  - Images 1.9 GB [here](http://imagenet.stanford.edu/internal/jcjohns/scene_graphs/sg_dataset.zip)
-  - Annotations [here](http://cs.stanford.edu/people/ranjaykrishna/vrd/json_dataset.zip)
+  - Images and annotations 1.9 GB 
+    [here](http://imagenet.stanford.edu/internal/jcjohns/scene_graphs/sg_dataset.zip)
+
+## Visual Relationship Detection Dataset
+- [Visual Relationship Detection](https://cs.stanford.edu/people/ranjaykrishna/vrd/)
+- Same 5000 images of Scene Graphs:
+  - 4006 train
+  - 1001
+  - Some images have problems with EXIF tags
+  - Some other have 0 annotated objects and 0 annotated relations
+- Vocabulary (clean version of Scene Graphs):
+  - 100 object categories
+  - 70 predicates
+- Download:
+  - Images 1.9 GB 
+    [here](http://imagenet.stanford.edu/internal/jcjohns/scene_graphs/sg_dataset.zip)
+  - Annotations 624K 
+    [here](http://cs.stanford.edu/people/ranjaykrishna/vrd/json_dataset.zip)
+
+Download:    
+```bash
+cd data/vrd
+
+wget http://imagenet.stanford.edu/internal/jcjohns/scene_graphs/sg_dataset.zip
+wget http://cs.stanford.edu/people/ranjaykrishna/vrd/json_dataset.zip
+md5sum sg_dataset.zip json_dataset.zip
+# f2ee909ebe04855b2ce8bc9ba4c96a23  sg_dataset.zip
+# 654e81f3c581e2cd929567268da8ef66  json_dataset.zip
+
+unzip sg_dataset.zip
+rm sg_dataset/sg_{train,test}_annotations.json
+mv sg_dataset/* raw
+rmdir sg_dataset
+unzip -d raw json_dataset.zip
+```
+
+Fine-tune detectron and evaluate performances (see this [notebook](../notebooks/COCOeval.ipynb])):
+```bash
+python -m xib.preprocessing.train_detectron \
+  --num-gpus=2 \
+  --dataset="vrd" \
+  --data-root="data/vrd/raw" \
+  OUTPUT_DIR "models/detectron_vrd_train" \
+  SOLVER.IMS_PER_BATCH 4 \
+  SOLVER.MAX_ITER 12000
+```
+
+Preprocess graphs for training:
+```bash
+python -m xib.preprocessing.vrd \
+  --confidence-threshold=.3 \
+  --d2-dir="models/detectron_vrd_train" \
+  --vrd-dir="data/vrd/raw" \
+  --output-dir="data/vrd/processed"
+```
 
 ## UnRel
 - [Unusual Relations](https://www.di.ens.fr/willow/research/unrel/)
