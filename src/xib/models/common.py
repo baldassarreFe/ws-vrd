@@ -234,10 +234,10 @@ class EdgeModel(torch.nn.Module):
 class OutputGlobalModel(nn.Module):
 
     class ReadoutMode(Enum):
-        FC_MAX = 0  # fully_connected( max {edges} )
-        MAX_FC = 1  # max { fully_connected(edges) }
+        FC_AGG = 0  # fully_connected( aggregation {edges} )
+        AGG_FC = 1  # aggregation { fully_connected(edges) }
 
-    def __init__(self, in_edge_features, fc_features, fc_layers, num_classes, mode: str):
+    def __init__(self, in_edge_features, fc_features, fc_layers, num_classes, mode: str, pooling: str, last_bias: bool):
         super(OutputGlobalModel, self).__init__()
         in_features = in_edge_features
 
@@ -246,7 +246,7 @@ class OutputGlobalModel(nn.Module):
             fcs[f'linear{i}'] = nn.Linear(in_features, fc_features)
             fcs[f'relu{i}'] = nn.ReLU()
             in_features = fc_features
-        fcs['output'] = nn.Linear(in_features, num_classes)
+        fcs['output'] = nn.Linear(in_features, num_classes, bias=last_bias)
         self.fcs = nn.Sequential(fcs)
 
         if isinstance(mode, str):
@@ -254,7 +254,11 @@ class OutputGlobalModel(nn.Module):
         if not isinstance(mode, OutputGlobalModel.ReadoutMode):
             raise ValueError(f'Invalid readout mode: {mode}')
 
+        if pooling not in {'max', 'mean'}:
+            raise ValueError(f'Invalid pooling mode: {pooling}')
+
         self.mode = mode
+        self.pooling = pooling
         self.out_features = num_classes
 
     def forward(
@@ -270,12 +274,12 @@ class OutputGlobalModel(nn.Module):
         #   and the fully connected layer simply apply the bias term
         edge_to_graph_idx = node_to_graph_idx[edge_indices[0]]
 
-        if self.mode is OutputGlobalModel.ReadoutMode.FC_MAX:
-            out = scatter_('max', edges, index=edge_to_graph_idx, dim=0, dim_size=num_graphs)
+        if self.mode is OutputGlobalModel.ReadoutMode.FC_AGG:
+            out = scatter_(self.pooling, edges, index=edge_to_graph_idx, dim=0, dim_size=num_graphs)
             out = self.fcs(out)
-        elif self.mode is OutputGlobalModel.ReadoutMode.MAX_FC:
+        elif self.mode is OutputGlobalModel.ReadoutMode.AGG_FC:
             edges = self.fcs(edges)
-            out = scatter_('max', edges, index=edge_to_graph_idx, dim=0, dim_size=num_graphs)
+            out = scatter_(self.pooling, edges, index=edge_to_graph_idx, dim=0, dim_size=num_graphs)
         else:
             raise ValueError(f'Invalid readout mode: {self.mode}')
 

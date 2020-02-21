@@ -44,7 +44,7 @@ class DatasetFolder(object):
     @classmethod
     def from_folder(cls, folder: Union[str, Path], *, suffix: str):
         folder = Path(folder).expanduser().resolve()
-        paths = sorted(p for p in folder.iterdir() if p.suffix == suffix)
+        paths = sorted(p for p in folder.iterdir() if p.name.endswith(suffix))
         if len(paths) == 0:
             logger.warning(f'Empty folder: no {suffix} file found in {folder}')
         return cls(paths)
