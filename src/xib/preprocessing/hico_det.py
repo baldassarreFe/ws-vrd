@@ -3,13 +3,15 @@ import time
 from pathlib import Path
 
 import torch
+from detectron2.data import MetadataCatalog
 from loguru import logger
 
-from ..datasets.hico_det.matlab_reader import HicoDetMatlabLoader
-from ..detectron2 import DetectronWrapper, boxes_to_edge_features
-from ..logging import setup_logging, add_logfile
-from ..structures import VisualRelations
-from ..utils import SigIntCatcher
+from xib.datasets.hico_det.catalog import register_hico
+from xib.datasets.hico_det.matlab_reader import HicoDetMatlabLoader
+from xib.detectron2 import DetectronWrapper, boxes_to_edge_features
+from xib.logging import setup_logging, add_logfile
+from xib.structures import VisualRelations
+from xib.utils import SigIntCatcher
 
 
 def parse_args():
@@ -18,13 +20,37 @@ def parse_args():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--hico-dir", required=True, type=resolve_path)
-    parser.add_argument("--output-dir", required=True, type=resolve_path)
-    parser.add_argument("--skip-existing", action="store_true")
-
-    parser.add_argument("--nms-threshold", required=True, type=float, default=0.7)
     parser.add_argument(
-        "--confidence-threshold", required=True, type=float, default=0.3
+        "--dataset", required=True, choices=["hico"], help="Which dataset to use"
+    )
+    parser.add_argument(
+        "--data-dir", required=True, type=resolve_path, help="Where the HICO dataset is"
+    )
+    parser.add_argument(
+        "--output-dir",
+        required=True,
+        type=resolve_path,
+        help="Where the processed samples will be save to",
+    )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help="Do not process images that already have a corresponding .pth file in the output directory",
+    )
+    parser.add_argument(
+        "--confidence-threshold",
+        required=True,
+        type=float,
+        default=0.3,
+        help="Confidence threshold to keep a detected instance",
+    )
+
+    parser.add_argument(
+        "--nms-threshold",
+        required=True,
+        type=float,
+        default=0.7,
+        help="Theshold to use when applying non-maximum suppression to duplicate boxes in the ground truth",
     )
 
     return parser.parse_args()
@@ -35,10 +61,17 @@ def main():
     args = parse_args()
 
     # Check files and folders
-    if not args.hico_dir.is_dir():
-        raise ValueError(f"Not a directory: {args.hico_dir}")
+    if not args.data_dir.is_dir():
+        raise ValueError(f"Not a directory: {args.data_dir}")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     add_logfile(args.output_dir / f"preprocessing_{int(time.time())}.log")
+
+    if args.dataset == "hico":
+        register_hico(args.data_dir)
+    else:
+        raise NotImplementedError(
+            "Only HICO supported for now, use xib.preprocessing.vrd for VRD"
+        )
 
     # Build detectron model
     #
@@ -48,12 +81,17 @@ def main():
     # the non-rotated image. Therefore, we must ignore the EXIF tag and extract
     # features for those boxes w.r.t. the non-rotated image.
     torch.set_grad_enabled(False)
-    detectron = DetectronWrapper(threshold=args.confidence_threshold, image_library='PIL')
+    detectron = DetectronWrapper(
+        config_file="model_zoo/coco-detection",
+        threshold=args.confidence_threshold,
+        image_library="PIL",
+    )
 
     # Load ground truth bounding boxes and human-object relations from the matlab file,
     # then process the image with detectron to extract visual features of the boxes.
     should_stop = SigIntCatcher()
-    loader = HicoDetMatlabLoader(args.hico_dir / "anno_bbox.mat")
+    matlab_root = MetadataCatalog.get("hico_relationship_detection_train").matlab_root
+    loader = HicoDetMatlabLoader(args.data_dir / matlab_root)
     for split in HicoDetMatlabLoader.Split:
         if should_stop:
             break
@@ -63,70 +101,76 @@ def main():
         d2_det_count = 0
         skipped_images = 0
 
+        metadata = MetadataCatalog.get(
+            f"hico_relationship_detection_{split.name.lower()}"
+        )
         output_dir = args.output_dir.joinpath(split.name.lower())
         output_dir.mkdir(exist_ok=True)
 
-        for s in loader.iter_vr_samples(split, args.nms_threshold):
+        for sample in loader.iter_vr_samples(split, args.nms_threshold):
             if should_stop:
                 break
 
             # If a .pth file already exist we might skip the image
-            output_path = output_dir.joinpath(s.filename).with_suffix(".pth")
-            if args.skip_existing and output_path.is_file():
+            out_path_graph = output_dir.joinpath(sample.filename).with_suffix(
+                ".graph.pth"
+            )
+            out_path_fp = output_dir.joinpath(sample.filename).with_suffix(".fp.pth")
+            if args.skip_existing and out_path_graph.is_file():
                 logger.debug(
-                    f"Skipping {split} image with existing .pth file: {s.filename}"
+                    f"Skipping {split} image with existing .pth file: {sample.filename}"
                 )
                 continue
 
             # If no ground-truth visual relation is present, we skip the image
             img_count += 1
-            gt_vr_count += len(s.gt_visual_relations)
-            gt_det_count += len(s.gt_instances)
-            if len(s.gt_visual_relations) == 0:
+            gt_vr_count += len(sample.gt_visual_relations)
+            gt_det_count += len(sample.gt_instances)
+            if len(sample.gt_visual_relations) == 0:
                 logger.warning(
-                    f"Skipping {split} image without any visible ground-truth relation: {s.filename}"
+                    f"Skipping {split} image without any visible ground-truth relation: {sample.filename}"
                 )
                 skipped_images += 1
                 continue
 
             # Run detectron on the image, extracting features from both the detected and ground-truth objects
-            image_path = args.hico_dir / split.image_dir / s.filename
-            s.d2_feature_pyramid, s.d2_instances, s.gt_instances = detectron(
-                image_path, s.gt_instances
+            image_path = args.data_dir / metadata.image_root / sample.filename
+            d2_feature_pyramid, sample.d2_instances, sample.gt_instances = detectron(
+                image_path, sample.gt_instances
             )
 
             # Move everything to cpu
-            s.d2_instances = s.d2_instances.to("cpu")
-            s.d2_feature_pyramid = {l: v.cpu() for l, v in s.d2_feature_pyramid.items()}
+            sample.d2_instances = sample.d2_instances.to("cpu")
+            d2_feature_pyramid = {l: v.cpu() for l, v in d2_feature_pyramid.items()}
 
             # Counts
-            d2_det_count += len(s.d2_instances)
-            if len(s.d2_instances) == 0:
+            d2_det_count += len(sample.d2_instances)
+            if len(sample.d2_instances) == 0:
                 logger.warning(
-                    f"Detectron could not find any object in {split} image: {s.filename}"
+                    f"Detectron could not find any object in {split} image: {sample.filename}"
                 )
 
             # Build a fully connected graph using gt boxes as nodes
             features, indexes = boxes_to_edge_features(
-                s.gt_visual_relations.instances.boxes,
-                s.gt_visual_relations.instances.image_size,
+                sample.gt_visual_relations.instances.boxes,
+                sample.gt_visual_relations.instances.image_size,
             )
-            s.gt_visual_relations_full = VisualRelations(
+            sample.gt_visual_relations_full = VisualRelations(
                 relation_indexes=indexes, linear_features=features
             )
 
             # Build a fully connected graph using gt boxes as nodes
             features, indexes = boxes_to_edge_features(
-                s.d2_instances.boxes, s.d2_instances.image_size
+                sample.d2_instances.boxes, sample.d2_instances.image_size
             )
-            s.d2_visual_relations_full = VisualRelations(
+            sample.d2_visual_relations_full = VisualRelations(
                 relation_indexes=indexes, linear_features=features
             )
 
-            # TODO s.feature_pyramid is quite big (50-70 MB) and not always needed
-            del s.d2_feature_pyramid
-
-            torch.save(s, output_path)
+            # d2_feature_pyramid is quite big (50-70 MB) and not always needed,
+            # so we save it in a separate file
+            torch.save(sample, out_path_graph)
+            torch.save(d2_feature_pyramid, out_path_fp)
 
         message = "\n".join(
             (

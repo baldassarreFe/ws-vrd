@@ -26,7 +26,10 @@ def parse_args():
         help="Where the pretrained detectron model is",
     )
     parser.add_argument(
-        "--vrd-dir", required=True, type=resolve_path, help="Where the VRD dataset is"
+        "--dataset", required=True, choices=["vrd"], help="Which dataset to use"
+    )
+    parser.add_argument(
+        "--data-dir", required=True, type=resolve_path, help="Where the VRD dataset is"
     )
     parser.add_argument(
         "--output-dir",
@@ -55,11 +58,17 @@ def main():
     args = parse_args()
 
     # Check files and folders
-    if not args.vrd_dir.is_dir():
-        raise ValueError(f"Not a directory: {args.vrd_dir}")
-    register_vrd(args.vrd_dir)
+    if not args.data_dir.is_dir():
+        raise ValueError(f"Not a directory: {args.data_dir}")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     add_logfile(args.output_dir / f"preprocessing_{int(time.time())}.log")
+
+    if args.dataset == "vrd":
+        register_vrd(args.data_dir)
+    else:
+        raise NotImplementedError(
+            "Only VRD supported for now, use xib.preprocessing.hico_det for HICO"
+        )
 
     # Build detectron model
     #
@@ -76,8 +85,9 @@ def main():
         image_library="PIL",
     )
 
-    # Load ground truth bounding boxes and human-object relations from the matlab file,
-    # then process the image with detectron to extract visual features of the boxes.
+    # Load ground truth bounding boxes and human-object relations from
+    # the json annotation file, then process the image with detectron
+    # to extract visual features of the boxes.
     should_stop = SigIntCatcher()
     for split in ["train", "test"]:
         if should_stop:
@@ -96,9 +106,14 @@ def main():
                 break
 
             # If a .pth file already exist we might skip the image
-            filename=Path(data_dict["file_name"]).name
-            output_path = output_dir.joinpath(filename).with_suffix(".pth")
-            if args.skip_existing and output_path.is_file():
+            filename = Path(data_dict["file_name"]).name
+            out_path_graph = output_dir.joinpath(filename).with_suffix(".graph.pth")
+            out_path_fp = output_dir.joinpath(filename).with_suffix(".fp.pth")
+            if (
+                args.skip_existing
+                and out_path_graph.is_file()
+                and out_path_fp.is_file()
+            ):
                 logger.debug(
                     f"Skipping {split} image with existing .pth file: {filename}"
                 )
@@ -118,15 +133,13 @@ def main():
                 continue
 
             # Run detectron on the image, extracting features from both the detected and ground-truth objects
-            sample.d2_feature_pyramid, sample.d2_instances, sample.gt_instances = detectron(
+            d2_feature_pyramid, sample.d2_instances, sample.gt_instances = detectron(
                 Path(data_dict["file_name"]), sample.gt_instances
             )
 
             # Move everything to cpu
             sample.d2_instances = sample.d2_instances.to("cpu")
-            sample.d2_feature_pyramid = {
-                l: v.cpu() for l, v in sample.d2_feature_pyramid.items()
-            }
+            d2_feature_pyramid = {l: v.cpu() for l, v in d2_feature_pyramid.items()}
 
             # Counts
             d2_det_count += len(sample.d2_instances)
@@ -152,10 +165,10 @@ def main():
                 relation_indexes=indexes, linear_features=features
             )
 
-            # TODO data_dict.feature_pyramid is quite big (50-70 MB) and not always needed
-            del sample.d2_feature_pyramid
-
-            torch.save(sample, output_path)
+            # d2_feature_pyramid is quite big (50-70 MB) and not always needed,
+            # so we save it in a separate file
+            torch.save(sample, out_path_graph)
+            torch.save(d2_feature_pyramid, out_path_fp)
 
         message = "\n".join(
             (

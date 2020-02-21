@@ -73,7 +73,7 @@ def register_hico(data_root: Union[str, Path]):
     from functools import partial
     from detectron2.data import DatasetCatalog, MetadataCatalog
 
-    raw = Path(data_root).expanduser().resolve() / 'hico_20160224_det' / 'raw'
+    raw = Path(data_root).expanduser().resolve() / "hico_20160224_det" / "raw"
 
     for split in ["train", "test"]:
         DatasetCatalog.register(
@@ -86,12 +86,14 @@ def register_hico(data_root: Union[str, Path]):
         )
         MetadataCatalog.get(f"hico_object_detection_{split}").set(
             thing_classes=OBJECTS.words,
-            image_root=f'hico_20160224_det/raw/images/{split}2015',
+            image_root=f"hico_20160224_det/raw/images/{split}2015",
+            matlab_root=f"hico_20160224_det/raw/anno_bbox.mat",
             evaluator_type="coco",
         )
         MetadataCatalog.get(f"hico_relationship_detection_{split}").set(
             thing_classes=OBJECTS.words,
             predicate_classes=PREDICATES.words,
-            graph_root=f'hico_20160224_det/processed/{split}',
-            image_root=f'hico_20160224_det/raw/images/{split}2015',
+            graph_root=f"hico_20160224_det/processed/{split}",
+            image_root=f"hico_20160224_det/raw/images/{split}2015",
+            matlab_root=f"hico_20160224_det/raw/anno_bbox.mat",
         )

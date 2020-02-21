@@ -178,18 +178,18 @@ def build_datasets(conf, seed: int) -> Tuple[Mapping[str, VrDataset], Metadata]:
     if "trainval" in conf:
         metadata = MetadataCatalog.get(conf.trainval.name)
         trainval_path = Path(conf.folder) / metadata.graph_root
-        trainval_folder = DatasetFolder.from_folder(trainval_path, suffix=".pth")
+        trainval_folder = DatasetFolder.from_folder(trainval_path, suffix=".graph.pth")
         train_folder, val_folder = trainval_folder.split(
             conf.trainval.split, random_state=seed
         )
     elif "train" in conf and "val" in conf:
         metadata = MetadataCatalog.get(conf.train.name)
         train_path = Path(conf.folder) / metadata.graph_root
-        train_folder = DatasetFolder.from_folder(train_path, suffix=".pth")
+        train_folder = DatasetFolder.from_folder(train_path, suffix=".graph.pth")
 
         metadata = MetadataCatalog.get(conf.val.name)
         val_path = Path(conf.folder) / metadata.graph_root
-        val_folder = DatasetFolder.from_folder(val_path, suffix=".pth")
+        val_folder = DatasetFolder.from_folder(val_path, suffix=".graph.pth")
     else:
         raise ValueError(f"Invalid data specification:\n{conf.pretty()}")
 
