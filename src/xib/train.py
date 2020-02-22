@@ -1,11 +1,13 @@
+import json
 import os
 import random
 import socket
 import textwrap
+import time
 from functools import partial
 from operator import itemgetter
 from pathlib import Path
-from typing import Callable, Tuple, Any, Dict, Mapping
+from typing import Callable, Tuple, Any, Dict, Mapping, Optional
 
 import numpy as np
 import pyaml
@@ -50,24 +52,26 @@ def setup_seeds(seed):
     torch.manual_seed(seed)
 
 
-def setup_all_loggers(conf: OmegaConf) -> [TensorboardLogger, TensorboardLogger]:
+def setup_all_loggers(conf: OmegaConf) -> [TensorboardLogger, TensorboardLogger, Path]:
     folder = Path(conf.checkpoint.folder).expanduser().resolve() / conf.fullname
     folder.mkdir(parents=True, exist_ok=True)
 
-    add_logfile(folder / "logs")
-
+    # Loguru logger: stderr and logs.txt
+    add_logfile(folder / "logs.txt")
     logger.info(f"PID: {os.getpid()}")
     logger.info(f"Host: {socket.gethostname()}")
     logger.info(f'SLURM_JOB_ID: {os.getenv("SLURM_JOB_ID")}')
 
-    # Prepare two loggers, the second one specifically for images, so the first one stays slim
+    # Tensorboard: two loggers, the second one specifically for images, so the first one stays slim
     tb_logger = TensorboardLogger(logdir=folder)
     tb_img_logger = TensorboardLogger(logdir=folder, filename_suffix=".images")
-
     add_custom_scalars(tb_logger.writer)
     add_hparam_summary(tb_logger.writer, conf.hparams)
 
-    return tb_logger, tb_img_logger
+    # Json: only validation metrics
+    json_logger = folder / "metrics.json"
+
+    return tb_logger, tb_img_logger, json_logger
 
 
 def pred_class_training_step(trainer: Trainer, batch: Batch):
@@ -253,11 +257,17 @@ def build_model(conf: OmegaConf, dataset_metadata) -> torch.nn.Module:
     return model
 
 
-def log_metrics(engine: Engine, name, tag: str, global_step_fn: Callable[[], int]):
+def log_metrics(engine: Engine, name, tag: str, json_logger: Optional[Path], global_step_fn: Callable[[], int]):
     global_step = global_step_fn()
     metrics = {f"{tag}/{k}": v for k, v in engine.state.metrics.items()}
+
     yaml = pyaml.dump(metrics, safe=True, sort_dicts=True, force_embed=True)
     logger.info(f"{name} {global_step}:\n{yaml}")
+
+    if json_logger is not None:
+        json_metrics = json.dumps({"walltime": time.time(), "global_step": global_step, **metrics})
+        with json_logger.open(mode='a') as f:
+            f.write(json_metrics + '\n')
 
 
 def log_effective_config(conf, trainer, tb_logger):
@@ -285,7 +295,7 @@ def main():
     # region Setup
     conf = parse_args()
     setup_seeds(conf.session.seed)
-    tb_logger, tb_img_logger = setup_all_loggers(conf)
+    tb_logger, tb_img_logger, json_logger = setup_all_loggers(conf)
     logger.info(
         "Parsed configuration:\n"
         + pyaml.dump(
@@ -384,7 +394,8 @@ def main():
         log_metrics,
         "Predicate classification training",
         "train",
-        pred_class_trainer.global_step,
+        json_logger=None,
+        global_step_fn=pred_class_trainer.global_step,
     )
     pred_class_trainer.add_event_handler(
         Events.EPOCH_COMPLETED,
@@ -461,6 +472,7 @@ def main():
         log_metrics,
         "Predicate classification validation",
         "val",
+        json_logger,
         pred_class_trainer.global_step,
     )
     pred_class_validator.add_event_handler(
@@ -527,6 +539,7 @@ def main():
         log_metrics,
         "Predicate detection validation",
         "val_vr",
+        json_logger,
         pred_class_trainer.global_step,
     )
     vr_predicate_validator.add_event_handler(
@@ -574,6 +587,7 @@ def main():
         log_metrics,
         "Phrase and relationship detection validation",
         "val_vr",
+        json_logger,
         pred_class_trainer.global_step,
     )
     vr_phrase_and_relation_validator.add_event_handler(

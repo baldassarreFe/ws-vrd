@@ -185,12 +185,27 @@ def add_hparam_summary(writer: SummaryWriter, hparams: OmegaConf):
     metric_infos = [
         {
             'tag': 'val/mAP',
-            'display_name': 'mAP',
+            'display_name': 'PC mAP',
             'dataset_type': 'validation',
         },
         {
             'tag': 'val/recall_at_5',
-            'display_name': 'R@5',
+            'display_name': 'PC R@5',
+            'dataset_type': 'validation',
+        },
+        {
+            'tag': 'val_vr/predicate/recall_at_50',
+            'display_name': 'VR Pred R@50',
+            'dataset_type': 'validation',
+        },
+        {
+            'tag': 'val_vr/phrase/recall_at_50',
+            'display_name': 'VR Phrase R@50',
+            'dataset_type': 'validation',
+        },
+        {
+            'tag': 'val_vr/relation/recall_at_50',
+            'display_name': 'VR Rel R@50',
             'dataset_type': 'validation',
         },
     ]
