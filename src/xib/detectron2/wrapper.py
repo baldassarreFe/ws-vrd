@@ -225,6 +225,8 @@ class DetectronWrapper(object):
             other_instances.probabs = pred_class_logits.softmax(dim=1).to(
                 other_instances.boxes.device
             )[:, :-1]
+            other_instances.scores = other_instances.probabs.gather(
+                dim=1, index=other_instances.classes[:, None]).squeeze(dim=1)
 
             # Compute linear features for each of the given object boxes
             # (it's ok to use the original boxes and original image size instead of the resized ones)
