@@ -2,7 +2,6 @@ model:
   name: xib.models.relational_network.build_relational_network
   input_node_model:
     in_conv_shape: [256, 7, 7]
-    in_linear_features: 3
     conv_channels: 256
     conv_layers: 2
     lin_features: 256
@@ -10,7 +9,6 @@ model:
     fc_features: 256
     fc_layers: 2
   input_edge_model:
-    in_linear_features: 10
     fc_features: 256
     fc_layers: 2
   edge_model:

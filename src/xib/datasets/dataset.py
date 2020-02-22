@@ -95,6 +95,10 @@ class VrDataset(torch.utils.data.Dataset):
             **instance_to_data_dict(input_instances, prefix="object"),
             **input_relations.to_data_dict(),
         )
+        input_graph.object_linear_features = torch.cat((
+            input_graph.object_linear_features,
+            input_graph.object_probabs
+        ), dim=1)
         # endregion
 
         # region Target: ground-truth relations

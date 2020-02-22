@@ -93,6 +93,8 @@ def register_hico(data_root: Union[str, Path]):
         MetadataCatalog.get(f"hico_relationship_detection_{split}").set(
             thing_classes=OBJECTS.words,
             predicate_classes=PREDICATES.words,
+            object_linear_features=3 + len(OBJECTS.words),
+            edge_linear_features=10,
             graph_root=f"hico_20160224_det/processed/{split}",
             image_root=f"hico_20160224_det/raw/images/{split}2015",
             matlab_root=f"hico_20160224_det/raw/anno_bbox.mat",

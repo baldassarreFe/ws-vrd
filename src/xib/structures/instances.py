@@ -41,7 +41,7 @@ def to_data_dict(instances: Instances, prefix=None):
         k: v
         for k, v in instances.get_fields().items()
         if v is not None
-        and k in {"classes", "scores", "linear_features", "conv_features"}
+        and k in {"classes", "scores", "probabs", "linear_features", "conv_features"}
     }
     if instances.has("boxes"):
         res["boxes"] = instances.boxes.tensor  # Nx4

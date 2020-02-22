@@ -67,8 +67,14 @@ class RelationalNetwork(nn.Module):
 
 
 def build_relational_network(conf: OmegaConf, dataset_metadata: Metadata) -> nn.Module:
-    input_node_model = InputNodeModel(**conf.input_node_model)
-    input_edge_model = InputEdgeModel(**conf.input_edge_model)
+    input_node_model = InputNodeModel(
+        in_linear_features=dataset_metadata.object_linear_features,
+        **conf.input_node_model
+    )
+    input_edge_model = InputEdgeModel(
+        in_linear_features=dataset_metadata.edge_linear_features,
+        **conf.input_edge_model
+    )
 
     conf.edge_model.in_node_features = input_node_model.out_features
     conf.edge_model.in_edge_features = input_edge_model.out_features

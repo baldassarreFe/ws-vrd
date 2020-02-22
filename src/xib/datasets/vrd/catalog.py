@@ -208,6 +208,8 @@ def register_vrd(data_root: Union[str, Path]):
         MetadataCatalog.get(f"vrd_relationship_detection_{split}").set(
             thing_classes=OBJECTS.words,
             predicate_classes=PREDICATES.words,
+            object_linear_features=3 + len(OBJECTS.words),
+            edge_linear_features=10,
             graph_root=f'vrd/processed/{split}',
             image_root=f'vrd/raw/sg_{split}_images',
         )
