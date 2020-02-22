@@ -28,7 +28,7 @@ losses:
     weight: 1.
 
 checkpoint:
-  keep: 3
+  keep: 2
   folder: ./runs
 
 session:
@@ -43,7 +43,7 @@ visual_relations:
   top_x_relations: 100
 
 hparams:
-  data--d: ${dataset.name}
+  data--: ${dataset.name}
   loss/bce--lbce: ${losses.bce.weight}
   loss/rank--lrank: ${losses.rank.weight}
   opt/weight_decay--wd: ${optimizer.weight_decay}
