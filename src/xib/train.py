@@ -125,7 +125,7 @@ def vr_validation_step(validator: Validator, batch: Batch):
 
     relations = validator.model(inputs)
 
-    return {"relations": relations.to("cpu")}
+    return {"relations": {k: r.to("cpu") for k, r in relations.items()}}
 
 
 class PredicateClassificationCriterion(object):
@@ -257,7 +257,13 @@ def build_model(conf: OmegaConf, dataset_metadata) -> torch.nn.Module:
     return model
 
 
-def log_metrics(engine: Engine, name, tag: str, json_logger: Optional[Path], global_step_fn: Callable[[], int]):
+def log_metrics(
+    engine: Engine,
+    name,
+    tag: str,
+    json_logger: Optional[Path],
+    global_step_fn: Callable[[], int],
+):
     global_step = global_step_fn()
     metrics = {f"{tag}/{k}": v for k, v in engine.state.metrics.items()}
 
@@ -265,9 +271,11 @@ def log_metrics(engine: Engine, name, tag: str, json_logger: Optional[Path], glo
     logger.info(f"{name} {global_step}:\n{yaml}")
 
     if json_logger is not None:
-        json_metrics = json.dumps({"walltime": time.time(), "global_step": global_step, **metrics})
-        with json_logger.open(mode='a') as f:
-            f.write(json_metrics + '\n')
+        json_metrics = json.dumps(
+            {"walltime": time.time(), "global_step": global_step, **metrics}
+        )
+        with json_logger.open(mode="a") as f:
+            f.write(json_metrics + "\n")
 
 
 def log_effective_config(conf, trainer, tb_logger):
@@ -517,17 +525,15 @@ def main():
     # region Predicate detection validation callbacks
     vr_predicate_validator.add_event_handler(
         Events.ITERATION_COMPLETED,
-        VisualRelationRecallAt(mode="PREDICATE_DETECTION", steps=(50, 100)),
+        VisualRelationRecallAt(type="predicate", steps=(50, 100)),
     )
-    for step in (50, 100):
-        Average(
-            output_transform=itemgetter(f"predicate/recall_at_{step}"),
-            device=conf.session.device,
-        ).attach(vr_predicate_validator, f"predicate/recall_at_{step}")
+    for mode in ("with_obj_scores", "no_obj_scores"):
+        for step in (50, 100):
+            Average(
+                output_transform=itemgetter(f"predicate/{mode}/recall_at_{step}")
+            ).attach(vr_predicate_validator, f"predicate/{mode}/recall_at_{step}")
 
-    ProgressBar(persist=True, desc="Pred det val").attach(
-        vr_predicate_validator, output_transform=itemgetter(f"predicate/recall_at_50")
-    )
+    ProgressBar(persist=True, desc="Pred det val").attach(vr_predicate_validator)
 
     tb_logger.attach(
         vr_predicate_validator,
@@ -559,22 +565,23 @@ def main():
     # region Phrase and relationship detection validation callbacks
     vr_phrase_and_relation_validator.add_event_handler(
         Events.ITERATION_COMPLETED,
-        VisualRelationRecallAt(mode="PHRASE_DETECTION", steps=(50, 100)),
+        VisualRelationRecallAt(type="phrase", steps=(50, 100)),
     )
     vr_phrase_and_relation_validator.add_event_handler(
         Events.ITERATION_COMPLETED,
-        VisualRelationRecallAt(mode="RELATIONSHIP_DETECTION", steps=(50, 100)),
+        VisualRelationRecallAt(type="relationship", steps=(50, 100)),
     )
-    for name in ["phrase", "relation"]:
-        for step in (50, 100):
-            Average(
-                output_transform=itemgetter(f"{name}/recall_at_{step}"),
-                device=conf.session.device,
-            ).attach(vr_phrase_and_relation_validator, f"{name}/recall_at_{step}")
+    for mode in ("with_obj_scores", "no_obj_scores"):
+        for name in ["phrase", "relationship"]:
+            for step in (50, 100):
+                Average(
+                    output_transform=itemgetter(f"{name}/{mode}/recall_at_{step}")
+                ).attach(
+                    vr_phrase_and_relation_validator, f"{name}/{mode}/recall_at_{step}"
+                )
 
     ProgressBar(persist=True, desc="Phrase and relation det val").attach(
-        vr_phrase_and_relation_validator,
-        output_transform=itemgetter("phrase/recall_at_50", "relation/recall_at_50"),
+        vr_phrase_and_relation_validator
     )
 
     tb_logger.attach(

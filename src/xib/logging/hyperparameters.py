@@ -5,19 +5,31 @@ from omegaconf import OmegaConf
 from tensorboardX import SummaryWriter
 from tensorboardX.x2num import make_np
 from tensorboardX.proto.summary_pb2 import Summary, SummaryMetadata
-from tensorboardX.proto.plugin_hparams_pb2 import HParamsPluginData, SessionEndInfo, SessionStartInfo
-from tensorboardX.proto.api_pb2 import Experiment, HParamInfo, MetricInfo, MetricName, Status, DatasetType, DataType
+from tensorboardX.proto.plugin_hparams_pb2 import (
+    HParamsPluginData,
+    SessionEndInfo,
+    SessionStartInfo,
+)
+from tensorboardX.proto.api_pb2 import (
+    Experiment,
+    HParamInfo,
+    MetricInfo,
+    MetricName,
+    Status,
+    DatasetType,
+    DataType,
+)
 
 from six import string_types
 
 from ..logging import loguru
 
-PLUGIN_NAME = 'hparams'
+PLUGIN_NAME = "hparams"
 PLUGIN_DATA_VERSION = 0
 
-EXPERIMENT_TAG = '_hparams_/experiment'
-SESSION_START_INFO_TAG = '_hparams_/session_start_info'
-SESSION_END_INFO_TAG = '_hparams_/session_end_info'
+EXPERIMENT_TAG = "_hparams_/experiment"
+SESSION_START_INFO_TAG = "_hparams_/session_start_info"
+SESSION_END_INFO_TAG = "_hparams_/session_end_info"
 
 
 def make_experiment_summary(hparam_infos, metric_infos, experiment):
@@ -36,60 +48,68 @@ def make_experiment_summary(hparam_infos, metric_infos, experiment):
     """
 
     def make_hparam_info(hparam):
-        data_type = hparam.get('type')
-        if hparam.get('type') is None:
+        data_type = hparam.get("type")
+        if hparam.get("type") is None:
             data_type = DataType.DATA_TYPE_UNSET
-        elif hparam.get('type') in string_types:
+        elif hparam.get("type") in string_types:
             data_type = DataType.DATA_TYPE_STRING
-        elif hparam.get('type') is bool:
+        elif hparam.get("type") is bool:
             data_type = DataType.DATA_TYPE_BOOL
-        elif hparam.get('type') in (float, int):
+        elif hparam.get("type") in (float, int):
             data_type = DataType.DATA_TYPE_FLOAT64
         return HParamInfo(
-            name=hparam['name'],
+            name=hparam["name"],
             type=data_type,
-            description=hparam.get('description'),
-            display_name=hparam.get('display_name'),
-            domain_discrete=hparam.get('domain_discrete'),
-            domain_interval=hparam.get('domain_interval'),
+            description=hparam.get("description"),
+            display_name=hparam.get("display_name"),
+            domain_discrete=hparam.get("domain_discrete"),
+            domain_interval=hparam.get("domain_interval"),
         )
 
     def make_metric_info(metric):
         return MetricInfo(
-            name=MetricName(tag=metric['tag']),
-            dataset_type=DatasetType.Value(f'DATASET_{metric.get("dataset_type", "UNKNOWN").upper()}'),
-            description=metric.get('description'),
-            display_name=metric.get('display_name')
+            name=MetricName(tag=metric["tag"]),
+            dataset_type=DatasetType.Value(
+                f'DATASET_{metric.get("dataset_type", "UNKNOWN").upper()}'
+            ),
+            description=metric.get("description"),
+            display_name=metric.get("display_name"),
         )
 
     def make_experiment_info(experiment, metric_infos, hparam_infos):
         return Experiment(
-            name=experiment['name'],
-            description=experiment.get('description'),
-            time_created_secs=experiment.get('time_created_secs'),
-            user=experiment.get('user'),
+            name=experiment["name"],
+            description=experiment.get("description"),
+            time_created_secs=experiment.get("time_created_secs"),
+            user=experiment.get("user"),
             metric_infos=metric_infos,
-            hparam_infos=hparam_infos
+            hparam_infos=hparam_infos,
         )
 
     metric_infos = [make_metric_info(m) for m in metric_infos]
     hparam_infos = [make_hparam_info(hp) for hp in hparam_infos]
     experiment = make_experiment_info(experiment, metric_infos, hparam_infos)
 
-    experiment_content = HParamsPluginData(experiment=experiment, version=PLUGIN_DATA_VERSION)
-    experiment_summary_metadata = SummaryMetadata(plugin_data=SummaryMetadata.PluginData(
-        plugin_name=PLUGIN_NAME,
-        content=experiment_content.SerializeToString())
+    experiment_content = HParamsPluginData(
+        experiment=experiment, version=PLUGIN_DATA_VERSION
     )
-    experiment_summary = Summary(value=[Summary.Value(
-        tag=EXPERIMENT_TAG,
-        metadata=experiment_summary_metadata
-    )])
+    experiment_summary_metadata = SummaryMetadata(
+        plugin_data=SummaryMetadata.PluginData(
+            plugin_name=PLUGIN_NAME, content=experiment_content.SerializeToString()
+        )
+    )
+    experiment_summary = Summary(
+        value=[Summary.Value(tag=EXPERIMENT_TAG, metadata=experiment_summary_metadata)]
+    )
 
     return experiment_summary
 
 
-def make_session_start_summary(hparam_values, group_name: Optional[str] = None, start_time_secs: Optional[int] = None):
+def make_session_start_summary(
+    hparam_values,
+    group_name: Optional[str] = None,
+    start_time_secs: Optional[int] = None,
+):
     """Assign values to the hyperparameters in the context of this session.
 
     Args:
@@ -102,8 +122,11 @@ def make_session_start_summary(hparam_values, group_name: Optional[str] = None, 
     """
     if start_time_secs is None:
         import time
+
         start_time_secs = int(time.time())
-    session_start_info = SessionStartInfo(group_name=group_name, start_time_secs=start_time_secs)
+    session_start_info = SessionStartInfo(
+        group_name=group_name, start_time_secs=start_time_secs
+    )
 
     for hp_name, hp_value in hparam_values.items():
         # Logging a None would raise an exception when setting session_start_info.hparams[hp_name].number_value = None.
@@ -111,9 +134,11 @@ def make_session_start_summary(hparam_values, group_name: Optional[str] = None, 
         # The best thing to do here is to skip that value, it will show as a blank cell in the table view of the
         # tensorboard plugin. However, that run would not be shown in the parallel coord or in the scatter plot view.
         if hp_value is None:
-            loguru.warning(f'Hyper parameter {hp_name} is `None`: the tensorboard hp plugin '
-                           f'will show this run in table view, but not in parallel coordinates '
-                           f'view or in scatter plot matrix view')
+            loguru.warning(
+                f"Hyper parameter {hp_name} is `None`: the tensorboard hp plugin "
+                f"will show this run in table view, but not in parallel coordinates "
+                f"view or in scatter plot matrix view"
+            )
             continue
 
         if isinstance(hp_value, string_types):
@@ -129,15 +154,21 @@ def make_session_start_summary(hparam_values, group_name: Optional[str] = None, 
 
         session_start_info.hparams[hp_name].number_value = hp_value
 
-    session_start_content = HParamsPluginData(session_start_info=session_start_info, version=PLUGIN_DATA_VERSION)
-    session_start_summary_metadata = SummaryMetadata(plugin_data=SummaryMetadata.PluginData(
-        plugin_name=PLUGIN_NAME,
-        content=session_start_content.SerializeToString()
-    ))
-    session_start_summary = Summary(value=[Summary.Value(
-        tag=SESSION_START_INFO_TAG,
-        metadata=session_start_summary_metadata
-    )])
+    session_start_content = HParamsPluginData(
+        session_start_info=session_start_info, version=PLUGIN_DATA_VERSION
+    )
+    session_start_summary_metadata = SummaryMetadata(
+        plugin_data=SummaryMetadata.PluginData(
+            plugin_name=PLUGIN_NAME, content=session_start_content.SerializeToString()
+        )
+    )
+    session_start_summary = Summary(
+        value=[
+            Summary.Value(
+                tag=SESSION_START_INFO_TAG, metadata=session_start_summary_metadata
+            )
+        ]
+    )
 
     return session_start_summary
 
@@ -152,21 +183,28 @@ def make_session_end_summary(status: str, end_time_secs: Optional[int] = None):
     Returns:
 
     """
-    status = Status.DESCRIPTOR.values_by_name[f'STATUS_{status.upper()}'].number
+    status = Status.DESCRIPTOR.values_by_name[f"STATUS_{status.upper()}"].number
     if end_time_secs is None:
         import time
+
         end_time_secs = int(time.time())
 
     session_end_summary = SessionEndInfo(status=status, end_time_secs=end_time_secs)
-    session_end_content = HParamsPluginData(session_end_info=session_end_summary, version=PLUGIN_DATA_VERSION)
-    session_end_summary_metadata = SummaryMetadata(plugin_data=SummaryMetadata.PluginData(
-        plugin_name=PLUGIN_NAME,
-        content=session_end_content.SerializeToString()
-    ))
-    session_end_summary = Summary(value=[Summary.Value(
-        tag=SESSION_END_INFO_TAG,
-        metadata=session_end_summary_metadata
-    )])
+    session_end_content = HParamsPluginData(
+        session_end_info=session_end_summary, version=PLUGIN_DATA_VERSION
+    )
+    session_end_summary_metadata = SummaryMetadata(
+        plugin_data=SummaryMetadata.PluginData(
+            plugin_name=PLUGIN_NAME, content=session_end_content.SerializeToString()
+        )
+    )
+    session_end_summary = Summary(
+        value=[
+            Summary.Value(
+                tag=SESSION_END_INFO_TAG, metadata=session_end_summary_metadata
+            )
+        ]
+    )
 
     return session_end_summary
 
@@ -175,45 +213,50 @@ def add_hparam_summary(writer: SummaryWriter, hparams: OmegaConf):
     hparam_infos = []
 
     for key, value in OmegaConf.to_container(hparams, resolve=True).items():
-        fullname, shortname = key.split('--')
+        fullname, shortname = key.split("--")
 
-        hparam_infos.append({
-            'name': fullname,
-            'type': type(value)
-        })
+        hparam_infos.append({"name": fullname, "type": type(value)})
 
     metric_infos = [
+        {"tag": "val/mAP", "display_name": "PC mAP", "dataset_type": "validation"},
         {
-            'tag': 'val/mAP',
-            'display_name': 'PC mAP',
-            'dataset_type': 'validation',
+            "tag": "val/recall_at_5",
+            "display_name": "PC R@5",
+            "dataset_type": "validation",
         },
         {
-            'tag': 'val/recall_at_5',
-            'display_name': 'PC R@5',
-            'dataset_type': 'validation',
+            "tag": "val_vr/predicate/with_obj_scores/recall_at_50",
+            "display_name": "VR Pred S R@50",
+            "dataset_type": "validation",
         },
         {
-            'tag': 'val_vr/predicate/recall_at_50',
-            'display_name': 'VR Pred R@50',
-            'dataset_type': 'validation',
+            "tag": "val_vr/phrase/with_obj_scores/recall_at_50",
+            "display_name": "VR Phrase S R@50",
+            "dataset_type": "validation",
         },
         {
-            'tag': 'val_vr/phrase/recall_at_50',
-            'display_name': 'VR Phrase R@50',
-            'dataset_type': 'validation',
+            "tag": "val_vr/relationship/with_obj_scores/recall_at_50",
+            "display_name": "VR Rel S R@50",
+            "dataset_type": "validation",
         },
         {
-            'tag': 'val_vr/relation/recall_at_50',
-            'display_name': 'VR Rel R@50',
-            'dataset_type': 'validation',
+            "tag": "val_vr/predicate/no_obj_scores/recall_at_50",
+            "display_name": "VR Pred R@50",
+            "dataset_type": "validation",
+        },
+        {
+            "tag": "val_vr/phrase/no_obj_scores/recall_at_50",
+            "display_name": "VR Phrase R@50",
+            "dataset_type": "validation",
+        },
+        {
+            "tag": "val_vr/relationship/no_obj_scores/recall_at_50",
+            "display_name": "VR Rel R@50",
+            "dataset_type": "validation",
         },
     ]
 
-    experiment = {
-        'name': 'experiment',
-        'time_created_secs': 0
-    }
+    experiment = {"name": "experiment", "time_created_secs": 0}
 
     experiment_summary = make_experiment_summary(hparam_infos, metric_infos, experiment)
     writer.file_writer.add_summary(experiment_summary)
@@ -223,7 +266,7 @@ def add_session_start(writer: SummaryWriter, hparams: OmegaConf):
     hparam_values = {}
 
     for key, value in OmegaConf.to_container(hparams, resolve=True).items():
-        fullname, shortname = key.split('--')
+        fullname, shortname = key.split("--")
 
         hparam_values[fullname] = value
 
@@ -232,8 +275,8 @@ def add_session_start(writer: SummaryWriter, hparams: OmegaConf):
 
 
 def add_session_end(writer: SummaryWriter, status: str):
-    if status not in {'UNKNOWN', 'SUCCESS', 'FAILURE', 'RUNNING'}:
-        loguru.warning(f'Invalid status: {status}')
+    if status not in {"UNKNOWN", "SUCCESS", "FAILURE", "RUNNING"}:
+        loguru.warning(f"Invalid status: {status}")
 
     session_end_summary = make_session_end_summary(status)
     writer.file_writer.add_summary(session_end_summary)

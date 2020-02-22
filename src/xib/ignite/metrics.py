@@ -4,7 +4,7 @@ import textwrap
 from abc import ABC
 from enum import Enum
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict, Union, Iterator, Callable
+from typing import List, Tuple, Optional, Dict, Union, Iterator, Callable, Sequence
 
 import cv2
 import numpy as np
@@ -30,8 +30,12 @@ class BatchMetric(Metric, ABC):
         if not engine.has_event_handler(self.started, Events.ITERATION_STARTED):
             engine.add_event_handler(Events.ITERATION_STARTED, self.started)
         # Update at the after every iteration
-        if not engine.has_event_handler(self.iteration_completed, Events.ITERATION_COMPLETED):
-            engine.add_event_handler(Events.ITERATION_COMPLETED, self.iteration_completed)
+        if not engine.has_event_handler(
+            self.iteration_completed, Events.ITERATION_COMPLETED
+        ):
+            engine.add_event_handler(
+                Events.ITERATION_COMPLETED, self.iteration_completed
+            )
         # Copy metric to engine.state.metrics after every iteration
         engine.add_event_handler(Events.ITERATION_COMPLETED, self.completed, name)
 
@@ -52,11 +56,9 @@ def mean_average_precision(annotations, scores) -> float:
     # i.e. none of the samples is positive for that class. It's best to pass `average=None` so that per-class
     # APs are returned and then compute the mean manually skipping nan values.
 
-    with np.errstate(invalid='ignore'):
+    with np.errstate(invalid="ignore"):
         average_precisions = sklearn.metrics.average_precision_score(
-            y_true=annotations,
-            y_score=scores,
-            average=None
+            y_true=annotations, y_score=scores, average=None
         )
 
     return np.nanmean(average_precisions).item()
@@ -66,7 +68,7 @@ class MeanAveragePrecisionBatch(BatchMetric):
     avg_precision: float
 
     def reset(self):
-        self.avg_precision = float('NaN')
+        self.avg_precision = float("NaN")
 
     def update(self, output: Tuple[torch.Tensor, torch.Tensor]):
         y_true, y_score = output
@@ -90,10 +92,7 @@ class MeanAveragePrecisionEpoch(Metric):
         self.y_score.append(y_score)
 
     def compute(self):
-        return mean_average_precision(
-            torch.cat(self.y_true),
-            torch.cat(self.y_score),
-        )
+        return mean_average_precision(torch.cat(self.y_true), torch.cat(self.y_score))
 
 
 def precision_at(annotations, scores, sizes):
@@ -119,7 +118,9 @@ def precision_at(annotations, scores, sizes):
     # sorted_scores = torch.gather(y_scores, index=sorted_labels, dim=1)
 
     # Use these indexes to index into y_true, but keep only max(sizes) columns
-    annotations_of_top_max_s = torch.gather(annotations, index=sorted_labels[:, :max(sizes)], dim=1)
+    annotations_of_top_max_s = torch.gather(
+        annotations, index=sorted_labels[:, : max(sizes)], dim=1
+    )
 
     # cumsum[i, j] = number of relevant items within the top j+1 retrieved items
     # Cast to float to avoid int/int division.
@@ -174,7 +175,9 @@ def recall_at(annotations, scores, sizes):
     # sorted_scores = torch.gather(y_scores, index=sorted_labels, dim=1)
 
     # Use these indexes to index into y_true, but keep only max(self.sizes) columns
-    annotations_of_top_max_s = torch.gather(annotations, index=sorted_labels[:, :max(sizes)], dim=1)
+    annotations_of_top_max_s = torch.gather(
+        annotations, index=sorted_labels[:, : max(sizes)], dim=1
+    )
 
     # cumsum[i, j] = number of relevant items within the top j+1 retrieved items
     # Cast to float to avoid int/int division.
@@ -192,9 +195,15 @@ def recall_at(annotations, scores, sizes):
 
 class RecallAtBatch(BatchMetric):
     """Recall@x over the output of the last batch"""
+
     _recall_at: Dict[int, Optional[float]]
 
-    def __init__(self, sizes: Tuple[int, ...] = (10, 30, 50), output_transform=lambda x: x, device=None):
+    def __init__(
+        self,
+        sizes: Tuple[int, ...] = (10, 30, 50),
+        output_transform=lambda x: x,
+        device=None,
+    ):
         self._sorted_sizes = list(sorted(sizes))
         super(RecallAtBatch, self).__init__(output_transform, device)
 
@@ -211,15 +220,21 @@ class RecallAtBatch(BatchMetric):
     def completed(self, engine, name):
         result = self.compute()
         for k, v in result.items():
-            engine.state.metrics[f'{name}_{k}'] = v
+            engine.state.metrics[f"{name}_{k}"] = v
 
 
 class RecallAtEpoch(Metric):
     """Recall@x by accumulating outputs over epochs"""
+
     _y_true: List[torch.Tensor]
     _y_score: List[torch.Tensor]
 
-    def __init__(self, sizes: Tuple[int, ...] = (10, 30, 50), output_transform=lambda x: x, device=None):
+    def __init__(
+        self,
+        sizes: Tuple[int, ...] = (10, 30, 50),
+        output_transform=lambda x: x,
+        device=None,
+    ):
         self._sorted_sizes = list(sorted(sizes))
         super(RecallAtEpoch, self).__init__(output_transform, device)
 
@@ -240,19 +255,19 @@ class RecallAtEpoch(Metric):
     def completed(self, engine, name):
         result = self.compute()
         for k, v in result.items():
-            engine.state.metrics[f'{name}_{k}'] = v
+            engine.state.metrics[f"{name}_{k}"] = v
 
 
 class PredicatePredictionLogger(object):
     def __init__(
-            self,
-            grid: Tuple[int, int],
-            data_root: Union[str, Path],
-            tag: str,
-            logger: SummaryWriter,
-            global_step_fn: Callable[[], int],
-            metadata: Metadata,
-            save_dir: Optional[Union[str, Path]] = None,
+        self,
+        grid: Tuple[int, int],
+        data_root: Union[str, Path],
+        tag: str,
+        logger: SummaryWriter,
+        global_step_fn: Callable[[], int],
+        metadata: Metadata,
+        save_dir: Optional[Union[str, Path]] = None,
     ):
         """
 
@@ -272,7 +287,7 @@ class PredicatePredictionLogger(object):
 
         self.img_dir = Path(data_root).expanduser().resolve() / metadata.image_root
         if not self.img_dir.is_dir():
-            raise ValueError(f'Image dir must exist: {self.img_dir}')
+            raise ValueError(f"Image dir must exist: {self.img_dir}")
 
         self.save_dir = save_dir
         if self.save_dir is not None:
@@ -281,18 +296,21 @@ class PredicatePredictionLogger(object):
 
     def __call__(self, engine: Engine):
         import matplotlib.pyplot as plt
-        plt.switch_backend('Agg')
+
+        plt.switch_backend("Agg")
 
         global_step = self.global_step_fn()
 
-        predicate_probs = engine.state.output['output'].sigmoid()
-        targets_bce = engine.state.output['target']
+        predicate_probs = engine.state.output["output"].sigmoid()
+        targets_bce = engine.state.output["target"]
         filenames = engine.state.batch[2]
 
         fig, axes = plt.subplots(*self.grid, figsize=(16, 12), dpi=50)
         axes_iter: Iterator[plt.Axes] = axes.flat
 
-        for target, pred, filename, ax in zip(targets_bce, predicate_probs, filenames, axes_iter):
+        for target, pred, filename, ax in zip(
+            targets_bce, predicate_probs, filenames, axes_iter
+        ):
             image = cv2.imread(self.img_dir.joinpath(filename).as_posix())
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             img_size = ImageSize(*image.shape[:2])
@@ -301,32 +319,54 @@ class PredicatePredictionLogger(object):
             mAP = mean_average_precision(target[None, :], pred[None, :])
 
             ax.imshow(image)
-            ax.set_title(f'{filename[:-4]} mAP {mAP:.1%} R@5 {recall_at_5:.1%}')
+            ax.set_title(f"{filename[:-4]} mAP {mAP:.1%} R@5 {recall_at_5:.1%}")
 
-            target_str = self.predicate_vocabulary.get_str(target.nonzero().flatten()).tolist()
+            target_str = self.predicate_vocabulary.get_str(
+                target.nonzero().flatten()
+            ).tolist()
             ax.text(
-                0.05, 0.95,
-                '\n'.join(target_str),
+                0.05,
+                0.95,
+                "\n".join(target_str),
                 transform=ax.transAxes,
                 fontsize=11,
-                verticalalignment='top',
-                bbox=dict(boxstyle='square', facecolor='white', alpha=0.8)
+                verticalalignment="top",
+                bbox=dict(boxstyle="square", facecolor="white", alpha=0.8),
             )
 
             top_5 = torch.argsort(pred, descending=True)[:5]
-            prediction_str = [f'{score:.1%} {str}' for score, str
-                              in zip(pred[top_5], self.predicate_vocabulary.get_str(top_5))]
+            prediction_str = [
+                f"{score:.1%} {str}"
+                for score, str in zip(
+                    pred[top_5], self.predicate_vocabulary.get_str(top_5)
+                )
+            ]
             ax.text(
-                0.65, 0.95,
-                '\n'.join(prediction_str),
+                0.65,
+                0.95,
+                "\n".join(prediction_str),
                 transform=ax.transAxes,
                 fontsize=11,
-                verticalalignment='top',
-                bbox=dict(boxstyle='square', facecolor='white', alpha=0.8)
+                verticalalignment="top",
+                bbox=dict(boxstyle="square", facecolor="white", alpha=0.8),
             )
 
-            ax.tick_params(which='both', **{k: False for k in ('bottom', 'top', 'left', 'right',
-                                                               'labelbottom', 'labeltop', 'labelleft', 'labelright')})
+            ax.tick_params(
+                which="both",
+                **{
+                    k: False
+                    for k in (
+                        "bottom",
+                        "top",
+                        "left",
+                        "right",
+                        "labelbottom",
+                        "labeltop",
+                        "labelleft",
+                        "labelright",
+                    )
+                },
+            )
             ax.set_xlim(0, img_size.width)
             ax.set_ylim(img_size.height, 0)
 
@@ -335,28 +375,37 @@ class PredicatePredictionLogger(object):
         if self.save_dir is not None:
             import io
             from PIL import Image
+
             with io.BytesIO() as buff:
-                fig.savefig(buff, format='png', facecolor='white', bbox_inches='tight', dpi=50)
-                pil_img = Image.open(buff).convert('RGB')
+                fig.savefig(
+                    buff, format="png", facecolor="white", bbox_inches="tight", dpi=50
+                )
+                pil_img = Image.open(buff).convert("RGB")
                 plt.close(fig)
-            save_path = self.save_dir.joinpath(f'{global_step}.{self.tag}.jpg')
-            pil_img.save(save_path, 'JPEG')
-            self.logger.add_image(f'{self.tag}', np.moveaxis(np.asarray(pil_img), 2, 0), global_step=global_step)
+            save_path = self.save_dir.joinpath(f"{global_step}.{self.tag}.jpg")
+            pil_img.save(save_path, "JPEG")
+            self.logger.add_image(
+                f"{self.tag}",
+                np.moveaxis(np.asarray(pil_img), 2, 0),
+                global_step=global_step,
+            )
         else:
-            self.logger.add_figure(f'{self.tag}', fig, global_step=global_step, close=True)
+            self.logger.add_figure(
+                f"{self.tag}", fig, global_step=global_step, close=True
+            )
 
 
 class VisualRelationPredictionLogger(object):
     def __init__(
-            self,
-            grid: Tuple[int, int],
-            data_root: Union[str, Path],
-            tag: str,
-            logger: SummaryWriter,
-            top_x_relations: int,
-            global_step_fn: Callable[[], int],
-            metadata: Metadata,
-            save_dir: Optional[Union[str, Path]] = None,
+        self,
+        grid: Tuple[int, int],
+        data_root: Union[str, Path],
+        tag: str,
+        logger: SummaryWriter,
+        top_x_relations: int,
+        global_step_fn: Callable[[], int],
+        metadata: Metadata,
+        save_dir: Optional[Union[str, Path]] = None,
     ):
         """
 
@@ -378,7 +427,7 @@ class VisualRelationPredictionLogger(object):
 
         self.img_dir = Path(data_root).expanduser().resolve() / metadata.image_root
         if not self.img_dir.is_dir():
-            raise ValueError(f'Image dir must exist: {self.img_dir}')
+            raise ValueError(f"Image dir must exist: {self.img_dir}")
 
         self.save_dir = save_dir
         if self.save_dir is not None:
@@ -386,37 +435,58 @@ class VisualRelationPredictionLogger(object):
             self.save_dir.mkdir(parents=True, exist_ok=True)
 
     def __call__(self, engine: Engine):
-        # import matplotlib.pyplot as plt
-        # plt.switch_backend('Agg')
-        #
         global_step = self.global_step_fn()
-
-        text = ''
-
-        relations = engine.state.output['relations']
+        relations = engine.state.output["relations"]
         targets = engine.state.batch[1]
         filenames = engine.state.batch[2]
 
+        for mode in ("with_obj_scores", "no_obj_scores"):
+            self._log_relations(relations[mode], targets, filenames, global_step)
+
+    def _log_relations(
+        self,
+        relations: Batch,
+        targets: Batch,
+        filenames: Sequence[str],
+        global_step: int,
+    ):
+        # import matplotlib.pyplot as plt
+        # plt.switch_backend('Agg')
+
+        text = ""
+
         pred_node_offsets = [0] + relations.n_nodes[:-1].cumsum(dim=0).tolist()
-        pred_relation_scores = torch.split_with_sizes(relations.relation_scores, relations.n_edges.tolist())
-        pred_predicate_scores = torch.split_with_sizes(relations.predicate_scores, relations.n_edges.tolist())
-        pred_predicate_classes = torch.split_with_sizes(relations.predicate_classes, relations.n_edges.tolist())
-        pred_relation_indexes = torch.split_with_sizes(relations.relation_indexes, relations.n_edges.tolist(), dim=1)
+        pred_relation_scores = torch.split_with_sizes(
+            relations.relation_scores, relations.n_edges.tolist()
+        )
+        pred_predicate_scores = torch.split_with_sizes(
+            relations.predicate_scores, relations.n_edges.tolist()
+        )
+        pred_predicate_classes = torch.split_with_sizes(
+            relations.predicate_classes, relations.n_edges.tolist()
+        )
+        pred_relation_indexes = torch.split_with_sizes(
+            relations.relation_indexes, relations.n_edges.tolist(), dim=1
+        )
 
         gt_node_offsets = [0] + targets.n_nodes[:-1].cumsum(dim=0).tolist()
-        gt_predicate_classes = torch.split_with_sizes(targets.predicate_classes, targets.n_edges.tolist())
-        gt_relation_indexes = torch.split_with_sizes(targets.relation_indexes, targets.n_edges.tolist(), dim=1)
+        gt_predicate_classes = torch.split_with_sizes(
+            targets.predicate_classes, targets.n_edges.tolist()
+        )
+        gt_relation_indexes = torch.split_with_sizes(
+            targets.relation_indexes, targets.n_edges.tolist(), dim=1
+        )
 
         for b in range(min(relations.num_graphs, self.grid[0] * self.grid[1])):
             buffer = (
-                f'{filenames[b]}\n'
-                f'- input instances {relations.n_nodes[b].item()}\n'
-                f'- (subj, obj) pairs {(relations.n_nodes[b] * (relations.n_nodes[b] - 1)).item()}\n\n'
+                f"{filenames[b]}\n"
+                f"- input instances {relations.n_nodes[b].item()}\n"
+                f"- (subj, obj) pairs {(relations.n_nodes[b] * (relations.n_nodes[b] - 1)).item()}\n\n"
             )
 
             top_x_relations = set()
             count_retrieved = 0
-            buffer += f'Top {relations.n_edges[b].item()} predicted relations:\n'
+            buffer += f"Top {relations.n_edges[b].item()} predicted relations:\n"
             for i in range(relations.n_edges[b].item()):
                 node_offset = pred_node_offsets[b]
                 score = pred_relation_scores[b][i].item()
@@ -427,23 +497,39 @@ class VisualRelationPredictionLogger(object):
                 predicate_class = pred_predicate_classes[b][i].item()
                 predicate_str = self.predicate_vocabulary.get_str(predicate_class)
 
-                subj_class = relations.object_classes[pred_relation_indexes[b][0, i]].item()
-                obj_class = relations.object_classes[pred_relation_indexes[b][1, i]].item()
-                subj_box = relations.object_boxes[pred_relation_indexes[b][0, i]].cpu().int().numpy()
-                obj_box = relations.object_boxes[pred_relation_indexes[b][1, i]].cpu().int().numpy()
+                subj_class = relations.object_classes[
+                    pred_relation_indexes[b][0, i]
+                ].item()
+                obj_class = relations.object_classes[
+                    pred_relation_indexes[b][1, i]
+                ].item()
+                subj_box = (
+                    relations.object_boxes[pred_relation_indexes[b][0, i]]
+                    .cpu()
+                    .int()
+                    .numpy()
+                )
+                obj_box = (
+                    relations.object_boxes[pred_relation_indexes[b][1, i]]
+                    .cpu()
+                    .int()
+                    .numpy()
+                )
                 subj_str = self.object_vocabulary.get_str(subj_class)
                 obj_str = self.object_vocabulary.get_str(obj_class)
 
-                top_x_relations.add((subj_class, subj_idx, predicate_class, obj_idx, obj_class))
+                top_x_relations.add(
+                    (subj_class, subj_idx, predicate_class, obj_idx, obj_class)
+                )
                 buffer += (
-                    f'{i + 1:3d} {score:.1e} : '
-                    f'({subj_idx - node_offset:3d}) {subj_str:<14} '
-                    f'{predicate_str:^14} '
-                    f'{obj_str:>14} ({obj_idx - node_offset:3d})   '
-                    f'{str(subj_box):<25} {predicate_score:>6.1%} {str(obj_box):>25}\n'
+                    f"{i + 1:3d} {score:.1e} : "
+                    f"({subj_idx - node_offset:3d}) {subj_str:<14} "
+                    f"{predicate_str:^14} "
+                    f"{obj_str:>14} ({obj_idx - node_offset:3d})   "
+                    f"{str(subj_box):<25} {predicate_score:>6.1%} {str(obj_box):>25}\n"
                 )
 
-            buffer += f'\nGround-truth relations:\n'
+            buffer += f"\nGround-truth relations:\n"
             for j in range(targets.n_edges[b].item()):
                 node_offset = gt_node_offsets[b]
 
@@ -454,29 +540,47 @@ class VisualRelationPredictionLogger(object):
 
                 subj_class = targets.object_classes[gt_relation_indexes[b][0, j]].item()
                 obj_class = targets.object_classes[gt_relation_indexes[b][1, j]].item()
-                subj_box = targets.object_boxes[gt_relation_indexes[b][0, j]].cpu().int().numpy()
-                obj_box = targets.object_boxes[gt_relation_indexes[b][1, j]].cpu().int().numpy()
+                subj_box = (
+                    targets.object_boxes[gt_relation_indexes[b][0, j]]
+                    .cpu()
+                    .int()
+                    .numpy()
+                )
+                obj_box = (
+                    targets.object_boxes[gt_relation_indexes[b][1, j]]
+                    .cpu()
+                    .int()
+                    .numpy()
+                )
                 subj_str = self.object_vocabulary.get_str(subj_class)
                 obj_str = self.object_vocabulary.get_str(obj_class)
 
                 # Assume the input boxes are from GT, not detectron, otherwise we'd have to match by IoU
                 # TODO add matching by IoU
-                retrieved = (subj_class, subj_idx, predicate_class, obj_idx, obj_class) in top_x_relations
+                retrieved = (
+                    subj_class,
+                    subj_idx,
+                    predicate_class,
+                    obj_idx,
+                    obj_class,
+                ) in top_x_relations
                 if retrieved:
                     count_retrieved += 1
                 buffer += (
                     f'{"  OK️" if retrieved else "    "}        : '
-                    f'({subj_idx - node_offset:3d}) {subj_str:<14} '
-                    f'{predicate_str:^14} '
-                    f'{obj_str:>14} ({obj_idx - node_offset:3d})   '
-                    f'{str(subj_box):<25}        {str(obj_box):>25}\n'
+                    f"({subj_idx - node_offset:3d}) {subj_str:<14} "
+                    f"{predicate_str:^14} "
+                    f"{obj_str:>14} ({obj_idx - node_offset:3d})   "
+                    f"{str(subj_box):<25}        {str(obj_box):>25}\n"
                 )
 
-            buffer += f'\nRecall@{self.top_x_relations}: {count_retrieved / targets.n_edges[b].item():.2%}\n\n'
+            buffer += f"\nRecall@{self.top_x_relations}: {count_retrieved / targets.n_edges[b].item():.2%}\n\n"
 
-            text += textwrap.indent(buffer, '    ', lambda line: True) + '---\n\n'
+            text += textwrap.indent(buffer, "    ", lambda line: True) + "---\n\n"
 
-        self.logger.add_text(f'Visual relations ({self.tag})', text, global_step=global_step)
+        self.logger.add_text(
+            f"Visual relations ({self.tag})", text, global_step=global_step
+        )
 
         # fig, axes = plt.subplots(*self.grid, figsize=(16, 12), dpi=50)
         # axes_iter: Iterator[plt.Axes] = axes.flat
@@ -537,58 +641,64 @@ class VisualRelationPredictionLogger(object):
 
 class VisualRelationRecallAt(object):
     class Mode(NamedEnumMixin, Enum):
-        PREDICATE_DETECTION = 'predicate'
-        PHRASE_DETECTION = 'phrase'
-        RELATIONSHIP_DETECTION = 'relation'
-
         def __init__(self, short_name):
             self.short_name = short_name
 
-    def __init__(self, mode: Union[str, VisualRelationRecallAt.Mode], steps: Tuple[int, ...]):
-        self.mode = VisualRelationRecallAt.Mode.get(mode)
+    def __init__(
+        self, type: Union[str, VisualRelationRecallAt.Mode], steps: Tuple[int, ...]
+    ):
+        if type == "predicate":
+            self._compute_matches = self._predicate_detection
+        elif type == "phrase":
+            self._compute_matches = self._phrase_detection
+        elif type == "relationship":
+            self._compute_matches = self._relationship_detection
+        else:
+            raise ValueError(f"Invalid visual relations matching type: {type}")
+
+        self.matching_type = type
         self.steps = torch.tensor(sorted(steps))
 
     def __call__(self, engine: Engine):
-        predictions = engine.state.output['relations']
         targets = engine.state.batch[1]
 
-        if self.mode is VisualRelationRecallAt.Mode.PREDICATE_DETECTION:
-            matches = self._predicate_detection(predictions, targets)
-        elif self.mode is VisualRelationRecallAt.Mode.PHRASE_DETECTION:
-            matches = self._phrase_detection(predictions, targets)
-        elif self.mode is VisualRelationRecallAt.Mode.RELATIONSHIP_DETECTION:
-            matches = self._relationship_detection(predictions, targets)
-        else:
-            raise ValueError(f'Invalid visual relations mode: {self.mode}')
-
-        recall_at = self._recall_at(predictions, targets, matches)
-        for k, r in recall_at.items():
-            engine.state.output[f'{self.mode.short_name}/recall_at_{k}'] = r
+        for mode in ("with_obj_scores", "no_obj_scores"):
+            predictions = engine.state.output["relations"][mode]
+            matches = self._compute_matches(predictions, targets)
+            recall_at = self._recall_at(predictions, targets, matches)
+            for k, r in recall_at.items():
+                engine.state.output[f"{self.matching_type}/{mode}/recall_at_{k}"] = r
 
     @staticmethod
     def _predicate_detection(predictions: Batch, targets: Batch) -> torch.Tensor:
         """Computes matches based on "predicate detection" mode."""
         # [E_t, 5]
-        gt_matrix = torch.stack([
-            # subject_idx, object_idx
-            targets.batch[targets.relation_indexes[0]],
-            targets.batch[targets.relation_indexes[1]],
-            # subject_class, predicate_class, object_class
-            targets.object_classes[targets.relation_indexes[0]],
-            targets.predicate_classes,
-            targets.object_classes[targets.relation_indexes[1]],
-        ], dim=1)
+        gt_matrix = torch.stack(
+            [
+                # subject_idx, object_idx
+                targets.batch[targets.relation_indexes[0]],
+                targets.batch[targets.relation_indexes[1]],
+                # subject_class, predicate_class, object_class
+                targets.object_classes[targets.relation_indexes[0]],
+                targets.predicate_classes,
+                targets.object_classes[targets.relation_indexes[1]],
+            ],
+            dim=1,
+        )
 
         # [E_p, 5]
-        pred_matrix = torch.stack([
-            # subject_idx, object_idx
-            predictions.batch[predictions.relation_indexes[0]],
-            predictions.batch[predictions.relation_indexes[1]],
-            # subject_class, predicate_class, object_class
-            predictions.object_classes[predictions.relation_indexes[0]],
-            predictions.predicate_classes,
-            predictions.object_classes[predictions.relation_indexes[1]],
-        ], dim=1)
+        pred_matrix = torch.stack(
+            [
+                # subject_idx, object_idx
+                predictions.batch[predictions.relation_indexes[0]],
+                predictions.batch[predictions.relation_indexes[1]],
+                # subject_class, predicate_class, object_class
+                predictions.object_classes[predictions.relation_indexes[0]],
+                predictions.predicate_classes,
+                predictions.object_classes[predictions.relation_indexes[1]],
+            ],
+            dim=1,
+        )
 
         # Block matrix [E_p, E_t]
         matches = (gt_matrix[None, :, :] == pred_matrix[:, None, :]).all(dim=2)
@@ -599,24 +709,30 @@ class VisualRelationRecallAt(object):
     def _phrase_detection(predictions: Batch, targets: Batch) -> torch.Tensor:
         """Computes matches based on "phrase detection" mode."""
         # [E_p, 4]
-        pred_matrix = torch.stack([
-            # graph_idx
-            predictions.batch[predictions.relation_indexes[0]],
-            # subject_class, predicate_class, object_class
-            predictions.object_classes[predictions.relation_indexes[0]],
-            predictions.predicate_classes,
-            predictions.object_classes[predictions.relation_indexes[1]],
-        ], dim=1)
+        pred_matrix = torch.stack(
+            [
+                # graph_idx
+                predictions.batch[predictions.relation_indexes[0]],
+                # subject_class, predicate_class, object_class
+                predictions.object_classes[predictions.relation_indexes[0]],
+                predictions.predicate_classes,
+                predictions.object_classes[predictions.relation_indexes[1]],
+            ],
+            dim=1,
+        )
 
         # [E_t, 4]
-        gt_matrix = torch.stack([
-            # graph_idx
-            targets.batch[targets.relation_indexes[0]],
-            # subject_class, predicate_class, object_class
-            targets.object_classes[targets.relation_indexes[0]],
-            targets.predicate_classes,
-            targets.object_classes[targets.relation_indexes[1]],
-        ], dim=1)
+        gt_matrix = torch.stack(
+            [
+                # graph_idx
+                targets.batch[targets.relation_indexes[0]],
+                # subject_class, predicate_class, object_class
+                targets.object_classes[targets.relation_indexes[0]],
+                targets.predicate_classes,
+                targets.object_classes[targets.relation_indexes[1]],
+            ],
+            dim=1,
+        )
 
         # Block matrix [E_p, E_t]
         matches_class = (gt_matrix[None, :, :] == pred_matrix[:, None, :]).all(dim=2)
@@ -637,7 +753,7 @@ class VisualRelationRecallAt(object):
         iou_union = box_iou(pred_union_boxes, gt_union_boxes)
 
         # Block matrix [E_p, E_t]
-        matches = matches_class & (iou_union > .5)
+        matches = matches_class & (iou_union > 0.5)
 
         return matches
 
@@ -645,24 +761,30 @@ class VisualRelationRecallAt(object):
     def _relationship_detection(predictions: Batch, targets: Batch) -> torch.Tensor:
         """Computes matches based on "relationship detection" mode"""
         # [E_p, 4]
-        pred_matrix = torch.stack([
-            # graph_idx
-            predictions.batch[predictions.relation_indexes[0]],
-            # subject_class, predicate_class, object_class
-            predictions.object_classes[predictions.relation_indexes[0]],
-            predictions.predicate_classes,
-            predictions.object_classes[predictions.relation_indexes[1]],
-        ], dim=1)
+        pred_matrix = torch.stack(
+            [
+                # graph_idx
+                predictions.batch[predictions.relation_indexes[0]],
+                # subject_class, predicate_class, object_class
+                predictions.object_classes[predictions.relation_indexes[0]],
+                predictions.predicate_classes,
+                predictions.object_classes[predictions.relation_indexes[1]],
+            ],
+            dim=1,
+        )
 
         # [E_t, 4]
-        gt_matrix = torch.stack([
-            # graph_idx
-            targets.batch[targets.relation_indexes[0]],
-            # subject_class, predicate_class, object_class
-            targets.object_classes[targets.relation_indexes[0]],
-            targets.predicate_classes,
-            targets.object_classes[targets.relation_indexes[1]],
-        ], dim=1)
+        gt_matrix = torch.stack(
+            [
+                # graph_idx
+                targets.batch[targets.relation_indexes[0]],
+                # subject_class, predicate_class, object_class
+                targets.object_classes[targets.relation_indexes[0]],
+                targets.predicate_classes,
+                targets.object_classes[targets.relation_indexes[1]],
+            ],
+            dim=1,
+        )
 
         # Block matrix [E_p, E_t]
         matches_class = (gt_matrix[None, :, :] == pred_matrix[:, None, :]).all(dim=2)
@@ -670,38 +792,45 @@ class VisualRelationRecallAt(object):
         # Two full matrices [E_p, E_t]
         iou_subject = box_iou(
             predictions.object_boxes[predictions.relation_indexes[0]],
-            targets.object_boxes[targets.relation_indexes[0]]
+            targets.object_boxes[targets.relation_indexes[0]],
         )
         iou_object = box_iou(
             predictions.object_boxes[predictions.relation_indexes[1]],
-            targets.object_boxes[targets.relation_indexes[1]]
+            targets.object_boxes[targets.relation_indexes[1]],
         )
 
         # Block matrix [E_p, E_t]
-        matches = matches_class & (iou_subject > .5) & (iou_object > .5)
+        matches = matches_class & (iou_subject > 0.5) & (iou_object > 0.5)
 
         return matches
 
-    def _recall_at(self, predictions: Batch, targets: Batch, matches: torch.Tensor) -> Dict[int, float]:
+    def _recall_at(
+        self, predictions: Batch, targets: Batch, matches: torch.Tensor
+    ) -> Dict[int, float]:
         # matches.argmax(dim=0) will return the last index if no True value is found.
         # We can use matches.any(dim=0) to ignore those cases.
         # Also, we must account for the row offset in the matches matrix.
         gt_retrieved = matches.any(dim=0)
 
-        offset = predictions.n_edges.cumsum(dim=0).repeat_interleave(targets.n_edges) - predictions.n_edges[0]
+        offset = (
+            predictions.n_edges.cumsum(dim=0).repeat_interleave(targets.n_edges)
+            - predictions.n_edges[0]
+        )
         gt_retrieved_rank = matches.int().argmax(dim=0) - offset
 
         # [K, E_t]
-        gt_retrieved_at = (gt_retrieved_rank[None, :] < self.steps[:, None]) & gt_retrieved[None, :]
+        gt_retrieved_at = (
+            gt_retrieved_rank[None, :] < self.steps[:, None]
+        ) & gt_retrieved[None, :]
 
         # [K, num_graphs]
         gt_relation_to_graph_assignment = targets.batch[targets.relation_indexes[0]]
         recall_at_per_graph = scatter_(
-            'mean',
+            "mean",
             gt_retrieved_at.float(),
             index=gt_relation_to_graph_assignment,
             dim=1,
-            dim_size=targets.num_graphs
+            dim_size=targets.num_graphs,
         )
 
         # [K]
