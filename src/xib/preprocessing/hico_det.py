@@ -44,7 +44,11 @@ def parse_args():
         default=0.3,
         help="Confidence threshold to keep a detected instance",
     )
-
+    parser.add_argument(
+        "--pyramid",
+        action="store_true",
+        help="Save the feature pyramid extracted by detectron",
+    )
     parser.add_argument(
         "--nms-threshold",
         required=True,
@@ -170,7 +174,8 @@ def main():
             # d2_feature_pyramid is quite big (50-70 MB) and not always needed,
             # so we save it in a separate file
             torch.save(sample, out_path_graph)
-            torch.save(d2_feature_pyramid, out_path_fp)
+            if args.pyramid:
+                torch.save(d2_feature_pyramid, out_path_fp)
 
         message = "\n".join(
             (
