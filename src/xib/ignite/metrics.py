@@ -8,6 +8,7 @@ from typing import List, Tuple, Optional, Dict, Union, Iterator, Callable, Seque
 
 import cv2
 import numpy as np
+import pandas as pd
 import sklearn.metrics
 import torch
 from detectron2.data.catalog import Metadata
@@ -637,6 +638,80 @@ class VisualRelationPredictionLogger(object):
         #     self.logger.add_image(f'{self.tag}', np.moveaxis(np.asarray(pil_img), 2, 0), global_step=global_step)
         # else:
         #     self.logger.add_figure(f'{self.tag}', fig, global_step=global_step, close=True)
+
+
+class HOImAP(Metric):
+    """Mean Average Precision over the 600 human-object interactions defined in HICO.
+
+    A human-object interaction is a triplet (person, predicate, object). This mAP is
+    only computed at image level, i.e. the interaction is either present or not.
+    If multiple visual relations with matching predicate and object are predicted
+    for a single image we keep the prediction with the highest score.
+    Scores are used to rank interactions and compute AP thresholds.
+    """
+
+    gt: List[Dict[Tuple[int, int], bool]]
+    pred: List[Dict[Tuple[int, int], float]]
+
+    _required_output_keys = ("relations", "targets")
+
+    def reset(self):
+        self.gt = []
+        self.pred = []
+
+    def update(self, output):
+        relations = output[0]["with_obj_scores"]
+        targets = output[1]
+
+        sizes = relations.n_edges.tolist()
+        for subjs, preds, objs, rel_scores in zip(
+            torch.split_with_sizes(
+                relations.object_classes[relations.relation_indexes[0]], sizes
+            ),
+            torch.split_with_sizes(relations.predicate_classes, sizes),
+            torch.split_with_sizes(
+                relations.object_classes[relations.relation_indexes[1]], sizes
+            ),
+            torch.split_with_sizes(relations.relation_scores, sizes),
+        ):
+            graph_hois = {}
+            for subj, pred, obj, hoi_score in zip(subjs, preds, objs, rel_scores):
+                if subj.item() != 0:
+                    continue
+                hoi = (pred.item(), obj.item())
+                if hoi_score.item() > graph_hois.get(hoi, -1):
+                    graph_hois[hoi] = hoi_score.item()
+            self.pred.append(graph_hois)
+
+        sizes = targets.n_edges.tolist()
+        for subjs, preds, objs in zip(
+            torch.split_with_sizes(
+                targets.object_classes[targets.relation_indexes[0]], sizes
+            ),
+            torch.split_with_sizes(targets.predicate_classes, sizes),
+            torch.split_with_sizes(
+                targets.object_classes[targets.relation_indexes[1]], sizes
+            ),
+        ):
+            graph_hois = {}
+            for subj, pred, obj in zip(subjs, preds, objs):
+                if subj.item() != 0:
+                    continue
+                hoi = (pred.item(), obj.item())
+                graph_hois[hoi] = True
+            self.gt.append(graph_hois)
+
+    def compute(self):
+        from xib.datasets.hico_det.metadata import HOI
+
+        gt = (
+            pd.DataFrame(self.gt)
+            .fillna(False, downcast={object: bool})
+            .reindex(columns=HOI, fill_value=0)
+        )
+        pred = pd.DataFrame(self.pred).fillna(0).reindex(columns=HOI, fill_value=0)
+
+        return mean_average_precision(gt.values.astype(np.int), pred.values)
 
 
 class VisualRelationRecallAt(object):

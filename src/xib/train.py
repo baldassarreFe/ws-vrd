@@ -28,6 +28,7 @@ from torch_geometric.data import Batch
 
 from .config import parse_args
 from .datasets import DatasetFolder, VrDataset, register_datasets
+from .ignite import HOImAP
 from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch
 from .ignite import MetricsHandler, OptimizerParamsHandler, EpochHandler
 from .ignite import PredicatePredictionLogger
@@ -125,7 +126,10 @@ def vr_validation_step(validator: Validator, batch: Batch):
 
     relations = validator.model(inputs)
 
-    return {"relations": {k: r.to("cpu") for k, r in relations.items()}}
+    return {
+        "relations": {k: r.to("cpu") for k, r in relations.items()},
+        "targets": targets,
+    }
 
 
 class PredicateClassificationCriterion(object):
@@ -579,6 +583,8 @@ def main():
                 ).attach(
                     vr_phrase_and_relation_validator, f"{name}/{mode}/recall_at_{step}"
                 )
+    if conf.dataset.name == 'hico':
+        HOImAP().attach(vr_phrase_and_relation_validator, 'hoi/mAP')
 
     ProgressBar(persist=True, desc="Phrase and relation det val").attach(
         vr_phrase_and_relation_validator
