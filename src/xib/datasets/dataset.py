@@ -81,6 +81,11 @@ class VrDataset(torch.utils.data.Dataset):
         else:
             raise ValueError(f"Unknown input mode: {self.input_mode}")
 
+        # TODO remove this after reding preprocessing of VRD
+        if not input_instances.has('scores'):
+            input_instances.scores = input_instances.probabs.gather(
+                dim=1, index=input_instances.classes[:, None]).squeeze(dim=1)
+
         input_graph = Data(
             # When collating this will be summed to num_nodes of other graphs
             num_nodes=len(input_instances),
