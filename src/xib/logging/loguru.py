@@ -8,18 +8,18 @@ import tqdm as _tqdm
 
 # Disable ignite debug messages
 _default_filter = {
-    'ignite': 'INFO',
-    'matplotlib': 'WARNING',
-    'PIL': 'WARNING',
-    '': True,
+    "ignite": "INFO",
+    "matplotlib": "WARNING",
+    "PIL": "WARNING",
+    "": True,
 }
 
 # Default loguru format, but with time in UTC
 _default_format = (
-    '<green>{time:YYYY-MM-DD HH:mm:ss.SSS!UTC}</green> | '
-    '<level>{level: <8}</level> | '
-    '<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - '
-    '<level>{message}</level>'
+    "<green>{time:YYYY-MM-DD HH:mm:ss.SSS!UTC}</green> | "
+    "<level>{level: <8}</level> | "
+    "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
+    "<level>{message}</level>"
 )
 
 
@@ -37,7 +37,9 @@ class InterceptHandler(_logging.Handler):
             frame = frame.f_back
             depth += 1
 
-        loguru.logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+        loguru.logger.opt(depth=depth, exception=record.exc_info).log(
+            level, record.getMessage()
+        )
 
 
 def setup_logging():
@@ -47,7 +49,7 @@ def setup_logging():
         sink=functools.partial(_tqdm.tqdm.write, end=""),
         colorize=True,
         filter=_default_filter,
-        format=_default_format
+        format=_default_format,
     )
 
     # Intercept standard logging messages toward your Loguru sinks
@@ -59,10 +61,4 @@ def add_logfile(path: Union[str, Path], format=None, filter=None):
         filter = _default_filter
     if format is None:
         format = _default_format
-    loguru.logger.add(
-        sink=path,
-        format=format,
-        colorize=False,
-        filter=filter,
-        mode='a'
-    )
+    loguru.logger.add(sink=path, format=format, colorize=False, filter=filter, mode="a")

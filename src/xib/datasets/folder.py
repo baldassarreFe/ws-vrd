@@ -28,25 +28,27 @@ class DatasetFolder(object):
     def split(self, percent: float, *, random_state: Optional[int] = None):
         rg = np.random.default_rng(random_state)
         indexes = rg.permutation(len(self))
-        split_1 = indexes[:int(percent * len(indexes))]
-        split_2 = indexes[int(percent * len(indexes)):]
+        split_1 = indexes[: int(percent * len(indexes))]
+        split_2 = indexes[int(percent * len(indexes)) :]
         return DatasetFolderSubset(self, split_1), DatasetFolderSubset(self, split_2)
 
     def load_eager(self, *, subset: Optional[Sequence[int]] = None, quiet=False):
         if subset is None:
             subset = range(len(self))
-        with tqdm(subset, desc='Loading', unit='s', disable=quiet) as bar:
+        with tqdm(subset, desc="Loading", unit="s", disable=quiet) as bar:
             for i in bar:
                 if self.samples[i] is None:
                     self.samples[i] = torch.load(self.paths[i])
-        logger.info(f'Loaded {len(subset)} samples in {bar.last_print_t - bar.start_t:.1f}s')
+        logger.info(
+            f"Loaded {len(subset)} samples in {bar.last_print_t - bar.start_t:.1f}s"
+        )
 
     @classmethod
     def from_folder(cls, folder: Union[str, Path], *, suffix: str):
         folder = Path(folder).expanduser().resolve()
         paths = sorted(p for p in folder.iterdir() if p.name.endswith(suffix))
         if len(paths) == 0:
-            logger.warning(f'Empty folder: no {suffix} file found in {folder}')
+            logger.warning(f"Empty folder: no {suffix} file found in {folder}")
         return cls(paths)
 
 

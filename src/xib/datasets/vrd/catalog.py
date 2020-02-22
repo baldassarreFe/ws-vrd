@@ -154,10 +154,10 @@ def data_dict_to_vr_sample(data_dict: Mapping) -> VrSample:
     # be discarded later.
     boxes = []
     classes = []
-    if len(data_dict['annotations']) > 0:
-        boxes, classes = zip(*(
-            (a["bbox"], a["category_id"]) for a in data_dict["annotations"]
-        ))
+    if len(data_dict["annotations"]) > 0:
+        boxes, classes = zip(
+            *((a["bbox"], a["category_id"]) for a in data_dict["annotations"])
+        )
     boxes = Boxes(torch.tensor(boxes, dtype=torch.float))
     classes = torch.tensor(classes, dtype=torch.long)
     sample.gt_instances = Instances(sample.img_size, boxes=boxes, classes=classes)
@@ -165,10 +165,12 @@ def data_dict_to_vr_sample(data_dict: Mapping) -> VrSample:
     relation_indexes = []
     predicate_classes = []
     if len(data_dict["relations"]) > 0:
-        relation_indexes, predicate_classes = zip(*(
-            ((r["subject_idx"], r["object_idx"]), r["category_id"])
-            for r in data_dict["relations"]
-        ))
+        relation_indexes, predicate_classes = zip(
+            *(
+                ((r["subject_idx"], r["object_idx"]), r["category_id"])
+                for r in data_dict["relations"]
+            )
+        )
 
     relation_indexes = (
         torch.tensor(relation_indexes, dtype=torch.long).view(-1, 2).transpose(0, 1)
@@ -189,7 +191,7 @@ def register_vrd(data_root: Union[str, Path]):
     from detectron2.data import DatasetCatalog, MetadataCatalog
 
     data_root = Path(data_root).expanduser().resolve()
-    raw = Path(data_root).expanduser().resolve() / 'vrd' / 'raw'
+    raw = Path(data_root).expanduser().resolve() / "vrd" / "raw"
 
     for split in ["train", "test"]:
         DatasetCatalog.register(
@@ -202,7 +204,7 @@ def register_vrd(data_root: Union[str, Path]):
         )
         MetadataCatalog.get(f"vrd_object_detection_{split}").set(
             thing_classes=OBJECTS.words,
-            image_root=f'vrd/raw/sg_{split}_images',
+            image_root=f"vrd/raw/sg_{split}_images",
             evaluator_type="coco",
         )
         MetadataCatalog.get(f"vrd_relationship_detection_{split}").set(
@@ -210,6 +212,6 @@ def register_vrd(data_root: Union[str, Path]):
             predicate_classes=PREDICATES.words,
             object_linear_features=3 + len(OBJECTS.words),
             edge_linear_features=10,
-            graph_root=f'vrd/processed/{split}',
-            image_root=f'vrd/raw/sg_{split}_images',
+            graph_root=f"vrd/processed/{split}",
+            image_root=f"vrd/raw/sg_{split}_images",
         )

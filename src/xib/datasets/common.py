@@ -9,13 +9,13 @@ from xib.structures import ImageSize
 def get_exif_orientation(img: Image) -> Union[int, None]:
     orientation = img.getexif().get(274)
     return {
-        2: 'FLIP_LEFT_RIGHT',
-        3: 'ROTATE_180',
-        4: 'FLIP_TOP_BOTTOM',
-        5: 'TRANSPOSE',
-        6: 'ROTATE_270',
-        7: 'TRANSVERSE',
-        8: 'ROTATE_90',
+        2: "FLIP_LEFT_RIGHT",
+        3: "ROTATE_180",
+        4: "FLIP_TOP_BOTTOM",
+        5: "TRANSPOSE",
+        6: "ROTATE_270",
+        7: "TRANSVERSE",
+        8: "ROTATE_90",
     }.get(orientation)
 
 

@@ -60,15 +60,18 @@ def boxes_to_edge_features(boxes: Boxes, image_size: Tuple[int, int]):
     relative_area = areas[:, None] / areas[None, :]  # N x N
     relative_area = relative_area.view(N * N)  # N*N
 
-    features = torch.stack([
-        relative_dist,
-        sin,
-        cos,
-        *quadrants.unbind(dim=1),
-        iou,
-        relative_area,
-        1 / relative_area
-    ], dim=1)  # N x num_feats
+    features = torch.stack(
+        [
+            relative_dist,
+            sin,
+            cos,
+            *quadrants.unbind(dim=1),
+            iou,
+            relative_area,
+            1 / relative_area,
+        ],
+        dim=1,
+    )  # N x num_feats
 
     # Remove elements on the diagonal (i.e. self-relationships)
     mask = indices[0] != indices[1]

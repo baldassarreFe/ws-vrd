@@ -583,8 +583,8 @@ def main():
                 ).attach(
                     vr_phrase_and_relation_validator, f"{name}/{mode}/recall_at_{step}"
                 )
-    if conf.dataset.name == 'hico':
-        HOImAP().attach(vr_phrase_and_relation_validator, 'hoi/mAP')
+    if conf.dataset.name == "hico":
+        HOImAP().attach(vr_phrase_and_relation_validator, "hoi/mAP")
 
     ProgressBar(persist=True, desc="Phrase and relation det val").attach(
         vr_phrase_and_relation_validator

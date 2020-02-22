@@ -14,7 +14,9 @@ def identity(*args):
     return args
 
 
-def flatten_dict(input: Mapping, prefix: Sequence = ()) -> Generator[Tuple[Tuple, Any], None, None]:
+def flatten_dict(
+    input: Mapping, prefix: Sequence = ()
+) -> Generator[Tuple[Tuple, Any], None, None]:
     """Flatten a dictionary into a sequence of (tuple_key, value) tuples
 
     Example:
@@ -54,4 +56,4 @@ class NamedEnumMixin(object):
             return value
         if isinstance(value, str):
             return cls[value]
-        raise ValueError(f'Invalid value {value} for {cls}')
+        raise ValueError(f"Invalid value {value} for {cls}")

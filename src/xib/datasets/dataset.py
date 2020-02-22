@@ -82,9 +82,10 @@ class VrDataset(torch.utils.data.Dataset):
             raise ValueError(f"Unknown input mode: {self.input_mode}")
 
         # TODO remove this after reding preprocessing of VRD
-        if not input_instances.has('scores'):
+        if not input_instances.has("scores"):
             input_instances.scores = input_instances.probabs.gather(
-                dim=1, index=input_instances.classes[:, None]).squeeze(dim=1)
+                dim=1, index=input_instances.classes[:, None]
+            ).squeeze(dim=1)
 
         input_graph = Data(
             # When collating this will be summed to num_nodes of other graphs
@@ -95,10 +96,9 @@ class VrDataset(torch.utils.data.Dataset):
             **instance_to_data_dict(input_instances, prefix="object"),
             **input_relations.to_data_dict(),
         )
-        input_graph.object_linear_features = torch.cat((
-            input_graph.object_linear_features,
-            input_graph.object_probabs
-        ), dim=1)
+        input_graph.object_linear_features = torch.cat(
+            (input_graph.object_linear_features, input_graph.object_probabs), dim=1
+        )
         # endregion
 
         # region Target: ground-truth relations

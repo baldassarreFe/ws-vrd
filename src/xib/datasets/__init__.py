@@ -12,8 +12,4 @@ def register_datasets(data_root: Union[str, Path]):
     register_vrd(data_root)
 
 
-__all__ = [
-    'VrDataset',
-    'DatasetFolder',
-    'register_datasets',
-]
+__all__ = ["VrDataset", "DatasetFolder", "register_datasets"]

@@ -11,7 +11,7 @@ class SigIntHandler(object):
 
     def _internal_handler(self, sig, frame):
         signal.signal(signal.SIGINT, self.old_handler)
-        logger.warning('Received SIGINT')
+        logger.warning("Received SIGINT")
         self.handler()
         self.old_handler = signal.signal(signal.SIGINT, self._internal_handler)
 

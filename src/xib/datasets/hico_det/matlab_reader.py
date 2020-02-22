@@ -14,13 +14,14 @@ from xib.structures import ImageSize, VisualRelations
 
 class HicoDetMatlabLoader(object):
     """Helper class to load HICO-Det annotations from the provided matlab file."""
+
     _path: Path
     _matlab_dict: Optional[dict] = None
     _interaction_triplets: List[Dict[str, str]] = None
 
     class Split(Enum):
-        TRAIN = 'bbox_train', 'images/train2015'
-        TEST = 'bbox_test', 'images/test2015'
+        TRAIN = "bbox_train", "images/train2015"
+        TEST = "bbox_test", "images/test2015"
 
         def __init__(self, matlab_name, image_dir):
             self._matlab_name = matlab_name
@@ -55,12 +56,14 @@ class HicoDetMatlabLoader(object):
         """
         if self._interaction_triplets is None:
             self._interaction_triplets = []
-            for interaction in self.matlab_dict['list_action'].squeeze():
-                self.interaction_triplets.append({
-                    'subject': 'person',
-                    'predicate': interaction['vname'].item().replace(' ', '_'),
-                    'object': interaction['nname'].item().replace(' ', '_')
-                })
+            for interaction in self.matlab_dict["list_action"].squeeze():
+                self.interaction_triplets.append(
+                    {
+                        "subject": "person",
+                        "predicate": interaction["vname"].item().replace(" ", "_"),
+                        "object": interaction["nname"].item().replace(" ", "_"),
+                    }
+                )
         return self._interaction_triplets
 
     def iter_hico_samples(self, split: Split) -> Iterator[dict]:
@@ -77,60 +80,68 @@ class HicoDetMatlabLoader(object):
     def _parse_hico(matlab_dict) -> Dict:
         """Parses one HICO-DET sample from the corresponding matlab dict using the default HICO structure."""
 
-        filename = matlab_dict['filename'].item()
+        filename = matlab_dict["filename"].item()
         size = ImageSize(
             # img['size']['depth'].item().item(),
-            matlab_dict['size']['height'].item().item(),
-            matlab_dict['size']['width'].item().item(),
+            matlab_dict["size"]["height"].item().item(),
+            matlab_dict["size"]["width"].item().item(),
         )
         interactions = []
 
         # All interaction types present in this image
-        for interaction in matlab_dict['hoi'].squeeze(0):
-            interaction_id = interaction['id'].item() - 1
+        for interaction in matlab_dict["hoi"].squeeze(0):
+            interaction_id = interaction["id"].item() - 1
 
             bb_subjects: List[Tuple[int, int, int, int]] = []
             bb_objects: List[Tuple[int, int, int, int]] = []
             connections: List[Tuple[int, int]] = []
 
             # Invisible interaction, no humans or objects visible
-            visible = interaction['invis'].item() == 0
+            visible = interaction["invis"].item() == 0
 
             if visible:
                 # All subject boxes for this interaction
                 bb_subjects = [
-                    (human['x1'].item(), human['y1'].item(), human['x2'].item(), human['y2'].item())
-                    for human in interaction['bboxhuman'].squeeze(0)
+                    (
+                        human["x1"].item(),
+                        human["y1"].item(),
+                        human["x2"].item(),
+                        human["y2"].item(),
+                    )
+                    for human in interaction["bboxhuman"].squeeze(0)
                 ]
 
                 # All object boxes for this interaction
                 bb_objects = [
-                    (object['x1'].item(), object['y1'].item(), object['x2'].item(), object['y2'].item())
-                    for object in interaction['bboxobject'].squeeze(0)
+                    (
+                        object["x1"].item(),
+                        object["y1"].item(),
+                        object["x2"].item(),
+                        object["y2"].item(),
+                    )
+                    for object in interaction["bboxobject"].squeeze(0)
                 ]
 
                 # All instances of this interaction type
                 connections: List[Tuple[int, int]] = []
-                for subject_box_id, object_box_id in interaction['connection']:
+                for subject_box_id, object_box_id in interaction["connection"]:
                     connections.append((subject_box_id - 1, object_box_id - 1))
 
-            interactions.append({
-                'interaction_id': interaction_id,
-                'visible': visible,
-                'bb_subjects': bb_subjects,
-                'bb_objects': bb_objects,
-                'connections': connections,
-            })
+            interactions.append(
+                {
+                    "interaction_id": interaction_id,
+                    "visible": visible,
+                    "bb_subjects": bb_subjects,
+                    "bb_objects": bb_objects,
+                    "connections": connections,
+                }
+            )
 
-        hico_dict = {
-            'filename': filename,
-            'size': size,
-            'interactions': interactions
-        }
+        hico_dict = {"filename": filename, "size": size, "interactions": interactions}
 
         return hico_dict
 
-    def _parse_vr(self, hico_dict: Mapping, nms_threshold: float = .7) -> VrSample:
+    def _parse_vr(self, hico_dict: Mapping, nms_threshold: float = 0.7) -> VrSample:
         """Parse one VrSample from the corresponding hico_dict using the visual relationship structure
 
         Also merge duplicate instances, i.e. boxes with the same object category
@@ -156,41 +167,52 @@ class HicoDetMatlabLoader(object):
 
         predicate_classes = []
 
-        for interaction in hico_dict['interactions']:
-            interaction_triplet = self.interaction_triplets[interaction['interaction_id']]
+        for interaction in hico_dict["interactions"]:
+            interaction_triplet = self.interaction_triplets[
+                interaction["interaction_id"]
+            ]
 
             # Invisible interaction, no humans or objects visible
-            if not interaction['visible']:
-                logger.debug(f'Skipping invisible interaction ('
-                             f'{interaction_triplet["subject"]}, '
-                             f'{interaction_triplet["predicate"]}, '
-                             f'{interaction_triplet["object"]}) '
-                             f'in {hico_dict["filename"]}')
+            if not interaction["visible"]:
+                logger.debug(
+                    f"Skipping invisible interaction ("
+                    f'{interaction_triplet["subject"]}, '
+                    f'{interaction_triplet["predicate"]}, '
+                    f'{interaction_triplet["object"]}) '
+                    f'in {hico_dict["filename"]}'
+                )
                 continue
 
             subj_offset = len(subject_boxes)
             obj_offset = len(object_boxes)
-            for subj_idx, obj_idx in interaction['connections']:
+            for subj_idx, obj_idx in interaction["connections"]:
                 subject_indexes.append(subj_idx + subj_offset)
                 object_indexes.append(obj_idx + obj_offset)
 
-            subject_boxes.extend(interaction['bb_subjects'])
-            object_boxes.extend(interaction['bb_objects'])
+            subject_boxes.extend(interaction["bb_subjects"])
+            object_boxes.extend(interaction["bb_objects"])
 
-            subject_classes.extend([interaction_triplet['subject']] * len(interaction['bb_subjects']))
-            predicate_classes.extend([interaction_triplet['predicate']] * len(interaction['connections']))
-            object_classes.extend([interaction_triplet['object']] * len(interaction['bb_objects']))
+            subject_classes.extend(
+                [interaction_triplet["subject"]] * len(interaction["bb_subjects"])
+            )
+            predicate_classes.extend(
+                [interaction_triplet["predicate"]] * len(interaction["connections"])
+            )
+            object_classes.extend(
+                [interaction_triplet["object"]] * len(interaction["bb_objects"])
+            )
 
         # Concatenate subject and object instances into a single list of objects
         boxes = Boxes(torch.tensor(subject_boxes + object_boxes))
-        classes = torch.tensor(OBJECTS.get_id(subject_classes + object_classes).values, dtype=torch.long)
+        classes = torch.tensor(
+            OBJECTS.get_id(subject_classes + object_classes).values, dtype=torch.long
+        )
 
         # Stack relationship indexes into a 2xM tensor (possibly 2x0),
         # also offset all object indexes since now they appear after all subjects
-        relation_indexes = torch.tensor([
-            subject_indexes,
-            object_indexes
-        ], dtype=torch.long)
+        relation_indexes = torch.tensor(
+            [subject_indexes, object_indexes], dtype=torch.long
+        )
         relation_indexes[1, :] += len(subject_boxes)
 
         # Merge boxes that overlap and have the same label
@@ -201,28 +223,30 @@ class HicoDetMatlabLoader(object):
             nms_threshold=nms_threshold,
         )
 
-        gt_instances = Instances(
-            hico_dict['size'],
-            classes=classes,
-            boxes=boxes
-        )
+        gt_instances = Instances(hico_dict["size"], classes=classes, boxes=boxes)
 
         gt_visual_relations = VisualRelations(
             instances=gt_instances,
-            predicate_classes=torch.tensor(PREDICATES.get_id(predicate_classes).values, dtype=torch.long),
+            predicate_classes=torch.tensor(
+                PREDICATES.get_id(predicate_classes).values, dtype=torch.long
+            ),
             relation_indexes=relation_indexes,
         )
 
         return VrSample(
-            filename=hico_dict['filename'],
-            img_size=hico_dict['size'],
+            filename=hico_dict["filename"],
+            img_size=hico_dict["size"],
             gt_instances=gt_instances,
             gt_visual_relations=gt_visual_relations,
         )
 
     @staticmethod
-    def _merge_overlapping(boxes: Boxes, classes: torch.LongTensor,
-                           relation_indexes: torch.LongTensor, nms_threshold: float):
+    def _merge_overlapping(
+        boxes: Boxes,
+        classes: torch.LongTensor,
+        relation_indexes: torch.LongTensor,
+        nms_threshold: float,
+    ):
         iou_above_thres = pairwise_iou(boxes, boxes) > nms_threshold
         iou_above_thres[classes[:, None] != classes[None, :]] = False
 
@@ -236,10 +260,14 @@ class HicoDetMatlabLoader(object):
             new_box_idx = len(keep)
             keep.append(old_box_idx)
 
-            matches = torch.nonzero(iou_above_thres[old_box_idx, :] & ~visited, as_tuple=True)[0]
+            matches = torch.nonzero(
+                iou_above_thres[old_box_idx, :] & ~visited, as_tuple=True
+            )[0]
             visited[matches] = True
 
-            rel_idx_to_fix = torch.any(relation_indexes[:, :, None] == matches[None, None, :], dim=2)
+            rel_idx_to_fix = torch.any(
+                relation_indexes[:, :, None] == matches[None, None, :], dim=2
+            )
             relation_indexes[rel_idx_to_fix] = new_box_idx
 
         return boxes[keep], classes[keep], relation_indexes

@@ -9,15 +9,15 @@ from torch_geometric.utils import scatter_
 
 class InputNodeModel(nn.Module):
     def __init__(
-            self,
-            in_conv_shape=None,
-            in_linear_features=None,
-            conv_channels=0,
-            conv_layers=0,
-            lin_features=None,
-            lin_layers=0,
-            fc_features=None,
-            fc_layers=0,
+        self,
+        in_conv_shape=None,
+        in_linear_features=None,
+        conv_channels=0,
+        conv_layers=0,
+        lin_features=None,
+        lin_layers=0,
+        fc_features=None,
+        fc_layers=0,
     ):
         """Input node model without message passing, transforms 1D/3D node features into a 1D vector.
 
@@ -43,20 +43,17 @@ class InputNodeModel(nn.Module):
 
         convs = OrderedDict()
         for i in range(conv_layers):
-            convs[f'conv{i}'] = nn.Conv2d(
-                in_channels,
-                conv_channels,
-                kernel_size=3,
-                padding=1,
+            convs[f"conv{i}"] = nn.Conv2d(
+                in_channels, conv_channels, kernel_size=3, padding=1
             )
-            convs[f'relu{i}'] = nn.ReLU()
+            convs[f"relu{i}"] = nn.ReLU()
             in_channels = conv_channels
         self.convs = nn.Sequential(convs)
 
         linear_fcs = OrderedDict()
         for i in range(lin_layers):
-            linear_fcs[f'linear{i}'] = nn.Linear(in_features, lin_features)
-            linear_fcs[f'relu{i}'] = nn.ReLU()
+            linear_fcs[f"linear{i}"] = nn.Linear(in_features, lin_features)
+            linear_fcs[f"relu{i}"] = nn.ReLU()
             in_features = lin_features
         self.linear_fcs = nn.Sequential(linear_fcs)
 
@@ -65,14 +62,16 @@ class InputNodeModel(nn.Module):
 
         combined_fcs = OrderedDict()
         for i in range(fc_layers):
-            combined_fcs[f'linear{i}'] = nn.Linear(in_features, fc_features)
-            combined_fcs[f'relu{i}'] = nn.ReLU()
+            combined_fcs[f"linear{i}"] = nn.Linear(in_features, fc_features)
+            combined_fcs[f"relu{i}"] = nn.ReLU()
             in_features = fc_features
         self.combined_fcs = nn.Sequential(combined_fcs)
 
         self.out_features = in_features
 
-    def forward(self, conv_features: torch.Tensor, linear_features: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, conv_features: torch.Tensor, linear_features: torch.Tensor
+    ) -> torch.Tensor:
         conv_features = self.convs(conv_features)
         conv_features = torch.flatten(conv_features, start_dim=1)
 
@@ -85,12 +84,7 @@ class InputNodeModel(nn.Module):
 
 
 class InputEdgeModel(nn.Module):
-    def __init__(
-            self,
-            in_linear_features=None,
-            fc_features=None,
-            fc_layers=0,
-    ):
+    def __init__(self, in_linear_features=None, fc_features=None, fc_layers=0):
         super(InputEdgeModel, self).__init__()
 
         if in_linear_features is None:
@@ -100,8 +94,8 @@ class InputEdgeModel(nn.Module):
 
         linear_fcs = OrderedDict()
         for i in range(fc_layers):
-            linear_fcs[f'linear{i}'] = nn.Linear(in_features, fc_features)
-            linear_fcs[f'relu{i}'] = nn.ReLU()
+            linear_fcs[f"linear{i}"] = nn.Linear(in_features, fc_features)
+            linear_fcs[f"relu{i}"] = nn.ReLU()
             in_features = fc_features
         self.linear_fcs = nn.Sequential(linear_fcs)
 
@@ -190,20 +184,14 @@ class InputEdgeModel(nn.Module):
 
 
 class EdgeModel(torch.nn.Module):
-    def __init__(
-            self,
-            in_node_features,
-            in_edge_features,
-            fc_features,
-            fc_layers
-    ):
+    def __init__(self, in_node_features, in_edge_features, fc_features, fc_layers):
         super(EdgeModel, self).__init__()
         in_features = in_node_features + in_edge_features + in_node_features
 
         fcs = OrderedDict()
         for i in range(fc_layers):
-            fcs[f'linear{i}'] = nn.Linear(in_features, fc_features)
-            fcs[f'relu{i}'] = nn.ReLU()
+            fcs[f"linear{i}"] = nn.Linear(in_features, fc_features)
+            fcs[f"relu{i}"] = nn.ReLU()
             in_features = fc_features
         self.fcs = nn.Sequential(fcs)
 
@@ -232,41 +220,49 @@ class EdgeModel(torch.nn.Module):
 
 
 class OutputGlobalModel(nn.Module):
-
     class ReadoutMode(Enum):
         FC_AGG = 0  # fully_connected( aggregation {edges} )
         AGG_FC = 1  # aggregation { fully_connected(edges) }
 
-    def __init__(self, in_edge_features, fc_features, fc_layers, num_classes, mode: str, pooling: str, last_bias: bool):
+    def __init__(
+        self,
+        in_edge_features,
+        fc_features,
+        fc_layers,
+        num_classes,
+        mode: str,
+        pooling: str,
+        last_bias: bool,
+    ):
         super(OutputGlobalModel, self).__init__()
         in_features = in_edge_features
 
         fcs = OrderedDict()
         for i in range(fc_layers):
-            fcs[f'linear{i}'] = nn.Linear(in_features, fc_features)
-            fcs[f'relu{i}'] = nn.ReLU()
+            fcs[f"linear{i}"] = nn.Linear(in_features, fc_features)
+            fcs[f"relu{i}"] = nn.ReLU()
             in_features = fc_features
-        fcs['output'] = nn.Linear(in_features, num_classes, bias=last_bias)
+        fcs["output"] = nn.Linear(in_features, num_classes, bias=last_bias)
         self.fcs = nn.Sequential(fcs)
 
         if isinstance(mode, str):
             mode = OutputGlobalModel.ReadoutMode[mode]
         if not isinstance(mode, OutputGlobalModel.ReadoutMode):
-            raise ValueError(f'Invalid readout mode: {mode}')
+            raise ValueError(f"Invalid readout mode: {mode}")
 
-        if pooling not in {'max', 'mean'}:
-            raise ValueError(f'Invalid pooling mode: {pooling}')
+        if pooling not in {"max", "mean"}:
+            raise ValueError(f"Invalid pooling mode: {pooling}")
 
         self.mode = mode
         self.pooling = pooling
         self.out_features = num_classes
 
     def forward(
-            self,
-            edges: torch.Tensor,
-            edge_indices: torch.LongTensor,
-            node_to_graph_idx: torch.LongTensor,
-            num_graphs: int
+        self,
+        edges: torch.Tensor,
+        edge_indices: torch.LongTensor,
+        node_to_graph_idx: torch.LongTensor,
+        num_graphs: int,
     ) -> torch.Tensor:
         # If a graph has no edges, i.e. len(edge_to_graph_idx.unique()) != num_graphs:
         # - if it also has 0 nodes it can cause a bug (see dataloader)
@@ -275,12 +271,16 @@ class OutputGlobalModel(nn.Module):
         edge_to_graph_idx = node_to_graph_idx[edge_indices[0]]
 
         if self.mode is OutputGlobalModel.ReadoutMode.FC_AGG:
-            out = scatter_(self.pooling, edges, index=edge_to_graph_idx, dim=0, dim_size=num_graphs)
+            out = scatter_(
+                self.pooling, edges, index=edge_to_graph_idx, dim=0, dim_size=num_graphs
+            )
             out = self.fcs(out)
         elif self.mode is OutputGlobalModel.ReadoutMode.AGG_FC:
             edges = self.fcs(edges)
-            out = scatter_(self.pooling, edges, index=edge_to_graph_idx, dim=0, dim_size=num_graphs)
+            out = scatter_(
+                self.pooling, edges, index=edge_to_graph_idx, dim=0, dim_size=num_graphs
+            )
         else:
-            raise ValueError(f'Invalid readout mode: {self.mode}')
+            raise ValueError(f"Invalid readout mode: {self.mode}")
 
         return out

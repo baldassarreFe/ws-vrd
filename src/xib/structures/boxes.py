@@ -6,7 +6,7 @@ from detectron2.structures import Boxes
 
 def area_intersection(boxes_a: Boxes, boxes_b: Boxes):
     if len(boxes_a) != len(boxes_b):
-        raise ValueError(f'The two boxes must have the same length')
+        raise ValueError(f"The two boxes must have the same length")
 
     # Boxes are represented as N x (x1, y1, x2, y2):
     a = boxes_a.tensor  # N x 4
@@ -70,7 +70,7 @@ def matched_boxlist_intersection(boxes_a: Boxes, boxes_b: Boxes) -> Boxes:
 
     """
     if len(boxes_a) != len(boxes_b):
-        raise ValueError(f'The two boxes must have the same length')
+        raise ValueError(f"The two boxes must have the same length")
 
     # Boxes are represented as N x (x1, y1, x2, y2):
     a = boxes_a.tensor  # N x 4
@@ -124,12 +124,12 @@ def matched_boxlist_union(a, b):
         return Boxes(matched_boxlist_union(a.tensor, b.tensor))
 
     if not isinstance(a, torch.Tensor) or not isinstance(b, torch.Tensor):
-        raise ValueError(f'Unkown data type {type(a)}, {type(b)}')
+        raise ValueError(f"Unkown data type {type(a)}, {type(b)}")
 
     if len(a) != len(b):
-        raise ValueError(f'The two boxes must have the same length')
+        raise ValueError(f"The two boxes must have the same length")
     if not a.shape[1] == b.shape[1] == 4:
-        raise ValueError(f'Wrong box shape {a.shape}, {b.shape}')
+        raise ValueError(f"Wrong box shape {a.shape}, {b.shape}")
 
     # Boxes are represented as N x (x1, y1, x2, y2):
     union_top_left = torch.min(a[:, :2], b[:, :2])  # N x (x1, y1)

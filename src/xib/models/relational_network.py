@@ -8,11 +8,11 @@ from .common import InputNodeModel, InputEdgeModel, EdgeModel, OutputGlobalModel
 
 class RelationalNetwork(nn.Module):
     def __init__(
-            self,
-            input_node_model: InputNodeModel,
-            input_edge_model: InputEdgeModel,
-            edge_model: EdgeModel,
-            output_global_model: OutputGlobalModel
+        self,
+        input_node_model: InputNodeModel,
+        input_edge_model: InputEdgeModel,
+        edge_model: EdgeModel,
+        output_global_model: OutputGlobalModel,
     ):
         super(RelationalNetwork, self).__init__()
         self.input_node_model = input_node_model
@@ -24,7 +24,7 @@ class RelationalNetwork(nn.Module):
         # Input
         node_features = self.input_node_model(
             linear_features=inputs.object_linear_features,
-            conv_features=inputs.object_conv_features
+            conv_features=inputs.object_conv_features,
         )
         edge_features = self.input_edge_model(
             linear_features=inputs.relation_linear_features
@@ -34,7 +34,7 @@ class RelationalNetwork(nn.Module):
         edge_features = self.edge_model(
             nodes=node_features,
             edges=edge_features,
-            edge_indices=inputs.relation_indexes
+            edge_indices=inputs.relation_indexes,
         )
 
         # Readout
@@ -42,15 +42,17 @@ class RelationalNetwork(nn.Module):
             edges=edge_features,
             edge_indices=inputs.relation_indexes,
             node_to_graph_idx=inputs.batch,
-            num_graphs=inputs.num_graphs
+            num_graphs=inputs.num_graphs,
         )
 
         # Build output batch so that it can be split back into graphs using Batch.to_data_list()
         keys_to_copy = (
-            'n_edges',
-            'n_nodes',
-            'object_boxes', 'object_classes',
-            'relation_indexes', 'object_image_size'
+            "n_edges",
+            "n_nodes",
+            "object_boxes",
+            "object_classes",
+            "relation_indexes",
+            "object_image_size",
         )
         outputs = Batch(
             num_nodes=inputs.num_nodes,
@@ -59,8 +61,8 @@ class RelationalNetwork(nn.Module):
             **{k: inputs[k] for k in keys_to_copy}
         )
         outputs.__slices__ = {
-            'predicate_scores': inputs.__slices__['relation_indexes'],
-            **{k: inputs.__slices__[k] for k in keys_to_copy}
+            "predicate_scores": inputs.__slices__["relation_indexes"],
+            **{k: inputs.__slices__[k] for k in keys_to_copy},
         }
 
         return outputs
@@ -82,13 +84,9 @@ def build_relational_network(conf: OmegaConf, dataset_metadata: Metadata) -> nn.
 
     conf.output_global_model.in_edge_features = edge_model.out_features
     output_global_model = OutputGlobalModel(
-        num_classes=len(dataset_metadata.predicate_classes),
-        **conf.output_global_model
+        num_classes=len(dataset_metadata.predicate_classes), **conf.output_global_model
     )
 
     return RelationalNetwork(
-        input_node_model,
-        input_edge_model,
-        edge_model,
-        output_global_model,
+        input_node_model, input_edge_model, edge_model, output_global_model
     )

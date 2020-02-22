@@ -6,5 +6,5 @@ def print_config():
     print(conf.pretty())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     print_config()

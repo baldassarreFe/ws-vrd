@@ -18,15 +18,17 @@ class CustomEngine(Engine):
         super(CustomEngine, self).__init__(process_function)
         self.conf = conf
 
-        if conf.session.device.startswith('cuda') and torch.cuda.is_available():
+        if conf.session.device.startswith("cuda") and torch.cuda.is_available():
             self.add_event_handler(Events.EPOCH_STARTED, CustomEngine._reset_gpu_stats)
-            self.add_event_handler(Events.EPOCH_COMPLETED, CustomEngine._compute_gpu_stats)
+            self.add_event_handler(
+                Events.EPOCH_COMPLETED, CustomEngine._compute_gpu_stats
+            )
 
     def run(self, data, max_epochs=None, epoch_length=None, seed=None):
         old_level = self.logger.level
         # Disable messages "INFO: Engine run starting with max_epochs=1"
         if max_epochs is None or max_epochs == 1:
-            self.logger.setLevel('WARNING')
+            self.logger.setLevel("WARNING")
 
         super(CustomEngine, self).run(data, max_epochs, epoch_length, seed)
 
@@ -39,8 +41,10 @@ class CustomEngine(Engine):
 
     @staticmethod
     def _compute_gpu_stats(engine: CustomEngine):
-        bytes = max(torch.cuda.max_memory_allocated(i) for i in range(torch.cuda.device_count()))
-        engine.state.metrics['gpu_mb'] = bytes // 2 ** 20
+        bytes = max(
+            torch.cuda.max_memory_allocated(i) for i in range(torch.cuda.device_count())
+        )
+        engine.state.metrics["gpu_mb"] = bytes // 2 ** 20
 
     @staticmethod
     def setup_training(engine: CustomEngine):
@@ -64,7 +68,7 @@ class Trainer(CustomEngine):
     criterion: Callable[[Any, Any], torch.Tensor]
 
     # Make sure state.samples is serialized when `Engine.state_dict()` is called
-    _state_dict_all_req_keys = CustomEngine._state_dict_all_req_keys + ('samples',)
+    _state_dict_all_req_keys = CustomEngine._state_dict_all_req_keys + ("samples",)
 
     def __init__(self, process_function, conf):
         super(Trainer, self).__init__(process_function, conf)
@@ -83,7 +87,7 @@ class Trainer(CustomEngine):
     def _patch_state(trainer: Trainer):
         """Customize the ignite.engine.State instance that is created after calling ignite.Engine.run
         """
-        trainer.state.samples = getattr(trainer.state, 'samples', 0)
+        trainer.state.samples = getattr(trainer.state, "samples", 0)
 
     @staticmethod
     def _increment_samples(trainer: Trainer):
@@ -93,7 +97,7 @@ class Trainer(CustomEngine):
     def load_state_dict(self, state_dict):
         # Make sure state.samples is deserialized when `Engine.load_state_dict()` is called
         super(Trainer, self).load_state_dict(state_dict)
-        setattr(self.state, 'samples', state_dict['samples'])
+        setattr(self.state, "samples", state_dict["samples"])
 
 
 class Validator(CustomEngine):
