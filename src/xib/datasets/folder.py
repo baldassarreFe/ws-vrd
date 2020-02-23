@@ -35,13 +35,16 @@ class DatasetFolder(object):
     def load_eager(self, *, subset: Optional[Sequence[int]] = None, quiet=False):
         if subset is None:
             subset = range(len(self))
+        loaded = 0
         with tqdm(subset, desc="Loading", unit="s", disable=quiet) as bar:
             for i in bar:
                 if self.samples[i] is None:
                     self.samples[i] = torch.load(self.paths[i])
-        logger.info(
-            f"Loaded {len(subset)} samples in {bar.last_print_t - bar.start_t:.1f}s"
-        )
+                    loaded += 1
+        if loaded > 0:
+            logger.info(
+                f"Loaded {loaded} remaining samples out of {len(subset)} in {bar.last_print_t - bar.start_t:.1f}s"
+            )
 
     @classmethod
     def from_folder(cls, folder: Union[str, Path], *, suffix: str):

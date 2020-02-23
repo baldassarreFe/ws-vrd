@@ -39,11 +39,11 @@ session:
     patience: 5
 
 visual_relations:
-  top_k_predicates: 5
+  top_k_predicates: 10
   top_x_relations: 100
   activations: yes
-  channel_mean: yes
-  relevance_fn: relu_sum
+  channel_mean: no
+  relevance_fn: l1
   object_scores: yes
 
 hparams:

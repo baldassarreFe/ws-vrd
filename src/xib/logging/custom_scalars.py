@@ -14,23 +14,29 @@ def add_custom_scalars(writer: SummaryWriter):
             "Visual relations detection metrics": {
                 "Predicate Recall@50": [
                     "MultiLine",
-                    ["val_gt/vr/predicate/recall_at_50"],
+                    ["(val|test)_gt/vr/predicate/recall_at_50"],
                 ],
                 "Predicate Recall@100": [
                     "MultiLine",
-                    ["val_gt/vr/predicate/recall_at_100"],
+                    ["(val|test)_gt/vr/predicate/recall_at_100"],
                 ],
-                "Phrase Recall@50": ["MultiLine", ["val_d2/vr/phrase/recall_at_50"]],
-                "Phrase Recall@100": ["MultiLine", ["val_d2/vr/phrase/recall_at_100"]],
+                "Phrase Recall@50": [
+                    "MultiLine",
+                    ["(val|test)_d2/vr/phrase/recall_at_50"],
+                ],
+                "Phrase Recall@100": [
+                    "MultiLine",
+                    ["(val|test)_d2/vr/phrase/recall_at_100"],
+                ],
                 "Relationship Recall@50": [
                     "MultiLine",
-                    ["val_d2/vr/relationship/recall_at_50"],
+                    ["(val|test)_d2/vr/relationship/recall_at_50"],
                 ],
                 "Relationship Recall@100": [
                     "MultiLine",
-                    ["val_d2/vr/relationship/recall_at_100"],
+                    ["(val|test)_d2/vr/relationship/recall_at_100"],
                 ],
             },
-            "Others": {"GPU (MB)": ["MultiLine", ["(train|val)_(gt|vr)/gpu_mb"]]},
+            "Others": {"GPU (MB)": ["MultiLine", ["(train|val|test)_(gt|vr)/gpu_mb"]]},
         }
     )

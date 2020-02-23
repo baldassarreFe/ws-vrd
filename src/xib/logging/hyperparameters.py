@@ -243,6 +243,21 @@ def add_hparam_summary(writer: SummaryWriter, hparams: OmegaConf):
             "display_name": "VR Rel R@50",
             "dataset_type": "validation",
         },
+        {
+            "tag": "test_gt/vr/predicate/recall_at_50",
+            "display_name": "Test VR Pred R@50",
+            "dataset_type": "validation",
+        },
+        {
+            "tag": "test_d2/vr/phrase/recall_at_50",
+            "display_name": "Test VR Phrase R@50",
+            "dataset_type": "validation",
+        },
+        {
+            "tag": "test_d2/vr/relationship/recall_at_50",
+            "display_name": "Test VR Rel R@50",
+            "dataset_type": "validation",
+        },
     ]
 
     experiment = {"name": "experiment", "time_created_secs": 0}
