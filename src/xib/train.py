@@ -126,10 +126,7 @@ def vr_validation_step(validator: Validator, batch: Batch):
 
     relations = validator.model(inputs)
 
-    return {
-        "relations": {k: r.to("cpu") for k, r in relations.items()},
-        "targets": targets,
-    }
+    return {"relations": relations.to("cpu"), "targets": targets}
 
 
 class PredicateClassificationCriterion(object):
@@ -180,23 +177,29 @@ def build_optimizer_and_scheduler(
     return optimizer, scheduler
 
 
-def build_datasets(conf, seed: int) -> Tuple[Mapping[str, VrDataset], Metadata]:
+def build_datasets(
+    conf, seed: int
+) -> Tuple[Mapping[str, VrDataset], Mapping[str, Metadata]]:
     register_datasets(conf.folder)
 
+    metadata = {}
+
     if "trainval" in conf:
-        metadata = MetadataCatalog.get(conf.trainval.name)
-        trainval_path = Path(conf.folder) / metadata.graph_root
+        metadata["train_gt"] = metadata["val_gt"] = metadata[
+            "val_d2"
+        ] = MetadataCatalog.get(conf.trainval.name)
+        trainval_path = Path(conf.folder) / metadata["train_gt"].graph_root
         trainval_folder = DatasetFolder.from_folder(trainval_path, suffix=".graph.pth")
         train_folder, val_folder = trainval_folder.split(
             conf.trainval.split, random_state=seed
         )
     elif "train" in conf and "val" in conf:
-        metadata = MetadataCatalog.get(conf.train.name)
-        train_path = Path(conf.folder) / metadata.graph_root
+        metadata["train_gt"] = MetadataCatalog.get(conf.train.name)
+        train_path = Path(conf.folder) / metadata["train_gt"].graph_root
         train_folder = DatasetFolder.from_folder(train_path, suffix=".graph.pth")
 
-        metadata = MetadataCatalog.get(conf.val.name)
-        val_path = Path(conf.folder) / metadata.graph_root
+        metadata["val_gt"] = metadata["val_d2"] = MetadataCatalog.get(conf.val.name)
+        val_path = Path(conf.folder) / metadata["val_gt"].graph_root
         val_folder = DatasetFolder.from_folder(val_path, suffix=".graph.pth")
     else:
         raise ValueError(f"Invalid data specification:\n{conf.pretty()}")
@@ -222,14 +225,29 @@ def build_datasets(conf, seed: int) -> Tuple[Mapping[str, VrDataset], Metadata]:
         ).view(1, -1)
         return input_graph, target_graph
 
-    targets = partial(
-        make_bce_and_rank_targets, num_classes=len(metadata.predicate_classes)
+    make_targets = partial(
+        make_bce_and_rank_targets,
+        num_classes=len(metadata["train_gt"].predicate_classes),
     )
+
     datasets = {
-        "train_gt": VrDataset(train_folder, input_mode="GT", transforms=targets),
-        "val_gt": VrDataset(val_folder, input_mode="GT", transforms=targets),
-        "val_d2": VrDataset(val_folder, input_mode="D2", transforms=targets),
+        "train_gt": VrDataset(train_folder, input_mode="GT", transforms=make_targets),
+        "val_gt": VrDataset(val_folder, input_mode="GT", transforms=make_targets),
+        "val_d2": VrDataset(val_folder, input_mode="D2", transforms=make_targets),
     }
+
+    if "test" in conf:
+        metadata["test_gt"] = metadata["test_d2"] = MetadataCatalog.get(conf.test.name)
+        test_path = Path(conf.folder) / metadata["test_gt"].graph_root
+        test_folder = DatasetFolder.from_folder(test_path, suffix=".graph.pth")
+        logger.info(f"Test split: {len(test_folder)} test")
+        datasets["test_gt"] = VrDataset(
+            test_folder, input_mode="GT", transforms=make_targets
+        )
+        datasets["test_d2"] = VrDataset(
+            test_folder, input_mode="D2", transforms=make_targets
+        )
+
     return datasets, metadata
 
 
@@ -248,11 +266,22 @@ def build_dataloaders(conf, datasets: Mapping[str, Dataset]) -> Dict[str, DataLo
         collate_fn=collate_fn,
     )
 
-    return {
+    dataloaders = {
         "train_gt": DataLoader(datasets["train_gt"], shuffle=True, **kwargs),
         "val_gt": DataLoader(datasets["val_gt"], shuffle=False, **kwargs),
         "val_d2": DataLoader(datasets["val_d2"], shuffle=False, **kwargs),
     }
+
+    if "test" in conf.dataset:
+        kwargs["drop_last"] = False
+        dataloaders["test_gt"] = DataLoader(
+            datasets["test_gt"], shuffle=False, **kwargs
+        )
+        dataloaders["test_d2"] = DataLoader(
+            datasets["test_d2"], shuffle=False, **kwargs
+        )
+
+    return dataloaders
 
 
 def build_model(conf: OmegaConf, dataset_metadata) -> torch.nn.Module:
@@ -266,13 +295,23 @@ def log_metrics(
     name,
     tag: str,
     json_logger: Optional[Path],
+    tb_logger: Optional[TensorboardLogger],
     global_step_fn: Callable[[], int],
 ):
     global_step = global_step_fn()
-    metrics = {f"{tag}/{k}": v for k, v in engine.state.metrics.items()}
+
+    metrics = {}
+    for k, v in engine.state.metrics.items():
+        if isinstance(v, torch.Tensor):
+            v = v.item()
+        metrics[f"{tag}/{k}"] = v
 
     yaml = pyaml.dump(metrics, safe=True, sort_dicts=True, force_embed=True)
     logger.info(f"{name} {global_step}:\n{yaml}")
+
+    if tb_logger is not None:
+        for k, v in metrics.items():
+            tb_logger.writer.add_scalar(k, v, global_step)
 
     if json_logger is not None:
         json_metrics = json.dumps(
@@ -332,7 +371,9 @@ def main():
     datasets, dataset_metadata = build_datasets(conf.dataset, seed=conf.session.seed)
     dataloaders = build_dataloaders(conf, datasets)
 
-    model = build_model(conf.model, dataset_metadata).to(conf.session.device)
+    model = build_model(conf.model, dataset_metadata["train_gt"]).to(
+        conf.session.device
+    )
     criterion = PredicateClassificationCriterion(conf.losses)
 
     pred_class_trainer = Trainer(pred_class_training_step, conf)
@@ -345,6 +386,10 @@ def main():
     pred_class_validator = Validator(pred_class_validation_step, conf)
     pred_class_validator.model = model
     pred_class_validator.criterion = criterion
+
+    pred_class_tester = Validator(pred_class_validation_step, conf)
+    pred_class_tester.model = model
+    pred_class_tester.criterion = criterion
     # endregion
 
     # region Visual Relations engines
@@ -353,8 +398,14 @@ def main():
     vr_predicate_validator = Validator(vr_validation_step, conf)
     vr_predicate_validator.model = vr_model
 
+    vr_predicate_tester = Validator(vr_validation_step, conf)
+    vr_predicate_tester.model = vr_model
+
     vr_phrase_and_relation_validator = Validator(vr_validation_step, conf)
     vr_phrase_and_relation_validator.model = vr_model
+
+    vr_phrase_and_relation_tester = Validator(vr_validation_step, conf)
+    vr_phrase_and_relation_tester.model = vr_model
     # endregion
 
     if "resume" in conf:
@@ -377,6 +428,10 @@ def main():
     # endregion
 
     # region Predicate classification training callbacks
+    ProgressBar(persist=True, desc="Pred class train").attach(
+        pred_class_trainer, output_transform=itemgetter("losses")
+    )
+
     tb_logger.attach(
         pred_class_trainer,
         OptimizerParamsHandler(
@@ -388,29 +443,24 @@ def main():
         Events.EPOCH_STARTED,
     )
 
-    MeanAveragePrecisionBatch(output_transform=itemgetter("target", "output")).attach(
-        pred_class_trainer, "mAP"
+    pred_class_trainer.add_event_handler(
+        Events.ITERATION_COMPLETED, MeanAveragePrecisionBatch()
     )
-    RecallAtBatch(
-        output_transform=itemgetter("target", "output"), sizes=(5, 10)
-    ).attach(pred_class_trainer, "recall_at")
-
-    ProgressBar(persist=True, desc="Pred class train").attach(
-        pred_class_trainer, metric_names="all", output_transform=itemgetter("losses")
+    pred_class_trainer.add_event_handler(
+        Events.ITERATION_COMPLETED, RecallAtBatch(sizes=(5, 10))
     )
 
     tb_logger.attach(
         pred_class_trainer,
         OutputHandler(
-            "train",
-            output_transform=itemgetter("losses"),
+            "train_gt",
+            output_transform=lambda o: {
+                **o["losses"],
+                "pc/mAP": o["pc/mAP"].mean().item(),
+                **{k: r.mean().item() for k, r in o["recalls"].items()},
+            },
             global_step_transform=pred_class_trainer.global_step,
         ),
-        Events.ITERATION_COMPLETED,
-    )
-    tb_logger.attach(
-        pred_class_trainer,
-        MetricsHandler("train", global_step_transform=pred_class_trainer.global_step),
         Events.ITERATION_COMPLETED,
     )
 
@@ -418,8 +468,9 @@ def main():
         Events.EPOCH_COMPLETED,
         log_metrics,
         "Predicate classification training",
-        "train",
+        "train_gt",
         json_logger=None,
+        tb_logger=tb_logger,
         global_step_fn=pred_class_trainer.global_step,
     )
     pred_class_trainer.add_event_handler(
@@ -427,9 +478,9 @@ def main():
         PredicatePredictionLogger(
             grid=(2, 3),
             data_root=conf.dataset.folder,
-            tag="train",
+            tag="train_gt",
             logger=tb_img_logger.writer,
-            metadata=dataset_metadata,
+            metadata=dataset_metadata["train_gt"],
             global_step_fn=pred_class_trainer.global_step,
         ),
     )
@@ -458,46 +509,38 @@ def main():
     # endregion
 
     # region Predicate classification validation callbacks
+    ProgressBar(persist=True, desc="Pred class val").attach(pred_class_validator)
+
     if conf.losses["bce"]["weight"] > 0:
-        Average(
-            output_transform=lambda o: o["losses"]["loss/bce"],
-            device=conf.session.device,
-        ).attach(pred_class_validator, "loss/bce")
+        Average(output_transform=lambda o: o["losses"]["loss/bce"]).attach(
+            pred_class_validator, "loss/bce"
+        )
     if conf.losses["rank"]["weight"] > 0:
-        Average(
-            output_transform=lambda o: o["losses"]["loss/rank"],
-            device=conf.session.device,
-        ).attach(pred_class_validator, "loss/rank")
-    Average(
-        output_transform=lambda o: o["losses"]["loss/total"], device=conf.session.device
-    ).attach(pred_class_validator, "loss/total")
+        Average(output_transform=lambda o: o["losses"]["loss/rank"]).attach(
+            pred_class_validator, "loss/rank"
+        )
+    Average(output_transform=lambda o: o["losses"]["loss/total"]).attach(
+        pred_class_validator, "loss/total"
+    )
 
     MeanAveragePrecisionEpoch(itemgetter("target", "output")).attach(
-        pred_class_validator, "mAP"
+        pred_class_validator, "pc/mAP"
     )
     RecallAtEpoch((5, 10), itemgetter("target", "output")).attach(
-        pred_class_validator, "recall_at"
-    )
-
-    ProgressBar(persist=True, desc="Pred class val").attach(
-        pred_class_validator, metric_names="all", output_transform=itemgetter("losses")
+        pred_class_validator, "pc/recall_at"
     )
 
     pred_class_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
         lambda val_engine: scheduler.step(val_engine.state.metrics["loss/total"]),
     )
-    tb_logger.attach(
-        pred_class_validator,
-        MetricsHandler("val", global_step_transform=pred_class_trainer.global_step),
-        Events.EPOCH_COMPLETED,
-    )
     pred_class_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
         log_metrics,
         "Predicate classification validation",
-        "val",
+        "val_gt",
         json_logger,
+        tb_logger,
         pred_class_trainer.global_step,
     )
     pred_class_validator.add_event_handler(
@@ -505,9 +548,9 @@ def main():
         PredicatePredictionLogger(
             grid=(2, 3),
             data_root=conf.dataset.folder,
-            tag="val",
+            tag="val_gt",
             logger=tb_img_logger.writer,
-            metadata=dataset_metadata,
+            metadata=dataset_metadata["val_gt"],
             global_step_fn=pred_class_trainer.global_step,
         ),
     )
@@ -531,8 +574,10 @@ def main():
             DiskSaver(
                 Path(conf.checkpoint.folder).expanduser().resolve() / conf.fullname
             ),
-            score_function=lambda val_engine: val_engine.state.metrics["recall_at_5"],
-            score_name="recall_at_5",
+            score_function=lambda val_engine: val_engine.state.metrics[
+                "pc/recall_at_5"
+            ],
+            score_name="pc_recall_at_5",
             n_saved=conf.checkpoint.keep,
             global_step_transform=pred_class_trainer.global_step,
         ),
@@ -544,25 +589,20 @@ def main():
         Events.ITERATION_COMPLETED,
         VisualRelationRecallAt(type="predicate", steps=(50, 100)),
     )
-    for mode in ("with_obj_scores", "no_obj_scores"):
-        for step in (50, 100):
-            Average(
-                output_transform=itemgetter(f"predicate/{mode}/recall_at_{step}")
-            ).attach(vr_predicate_validator, f"predicate/{mode}/recall_at_{step}")
+    for step in (50, 100):
+        Average(output_transform=itemgetter(f"vr/predicate/recall_at_{step}")).attach(
+            vr_predicate_validator, f"vr/predicate/recall_at_{step}"
+        )
 
     ProgressBar(persist=True, desc="Pred det val").attach(vr_predicate_validator)
 
-    tb_logger.attach(
-        vr_predicate_validator,
-        MetricsHandler("val_vr", global_step_transform=pred_class_trainer.global_step),
-        Events.EPOCH_COMPLETED,
-    )
     vr_predicate_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
         log_metrics,
         "Predicate detection validation",
-        "val_vr",
+        "val_gt",
         json_logger,
+        tb_logger,
         pred_class_trainer.global_step,
     )
     vr_predicate_validator.add_event_handler(
@@ -573,13 +613,16 @@ def main():
             tag="with GT boxes",
             logger=tb_img_logger.writer,
             top_x_relations=conf.visual_relations.top_x_relations,
-            metadata=dataset_metadata,
+            metadata=dataset_metadata["val_gt"],
             global_step_fn=pred_class_trainer.global_step,
         ),
     )
     # endregion
 
     # region Phrase and relationship detection validation callbacks
+    ProgressBar(persist=True, desc="Phrase and relation det val").attach(
+        vr_phrase_and_relation_validator
+    )
     vr_phrase_and_relation_validator.add_event_handler(
         Events.ITERATION_COMPLETED,
         VisualRelationRecallAt(type="phrase", steps=(50, 100)),
@@ -588,32 +631,21 @@ def main():
         Events.ITERATION_COMPLETED,
         VisualRelationRecallAt(type="relationship", steps=(50, 100)),
     )
-    for mode in ("with_obj_scores", "no_obj_scores"):
-        for name in ["phrase", "relationship"]:
-            for step in (50, 100):
-                Average(
-                    output_transform=itemgetter(f"{name}/{mode}/recall_at_{step}")
-                ).attach(
-                    vr_phrase_and_relation_validator, f"{name}/{mode}/recall_at_{step}"
-                )
+    for name in ["phrase", "relationship"]:
+        for step in (50, 100):
+            Average(output_transform=itemgetter(f"vr/{name}/recall_at_{step}")).attach(
+                vr_phrase_and_relation_validator, f"vr/{name}/recall_at_{step}"
+            )
     if conf.dataset.name == "hico":
-        HOImAP().attach(vr_phrase_and_relation_validator, "hoi/mAP")
+        HOImAP().attach(vr_phrase_and_relation_validator, "vr/hoi/mAP")
 
-    ProgressBar(persist=True, desc="Phrase and relation det val").attach(
-        vr_phrase_and_relation_validator
-    )
-
-    tb_logger.attach(
-        vr_phrase_and_relation_validator,
-        MetricsHandler("val_vr", global_step_transform=pred_class_trainer.global_step),
-        Events.EPOCH_COMPLETED,
-    )
     vr_phrase_and_relation_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
         log_metrics,
         "Phrase and relationship detection validation",
-        "val_vr",
+        "val_d2",
         json_logger,
+        tb_logger,
         pred_class_trainer.global_step,
     )
     vr_phrase_and_relation_validator.add_event_handler(
@@ -624,26 +656,162 @@ def main():
             tag="with D2 boxes",
             logger=tb_img_logger.writer,
             top_x_relations=conf.visual_relations.top_x_relations,
-            metadata=dataset_metadata,
+            metadata=dataset_metadata["val_d2"],
             global_step_fn=pred_class_trainer.global_step,
         ),
     )
     # endregion
 
+    if "test" in conf.dataset:
+        # region Predicate classification testing callbacks
+        if conf.losses["bce"]["weight"] > 0:
+            Average(
+                output_transform=lambda o: o["losses"]["loss/bce"],
+                device=conf.session.device,
+            ).attach(pred_class_tester, "loss/bce")
+        if conf.losses["rank"]["weight"] > 0:
+            Average(
+                output_transform=lambda o: o["losses"]["loss/rank"],
+                device=conf.session.device,
+            ).attach(pred_class_tester, "loss/rank")
+        Average(
+            output_transform=lambda o: o["losses"]["loss/total"],
+            device=conf.session.device,
+        ).attach(pred_class_tester, "loss/total")
+
+        MeanAveragePrecisionEpoch(itemgetter("target", "output")).attach(
+            pred_class_tester, "pc/mAP"
+        )
+        RecallAtEpoch((5, 10), itemgetter("target", "output")).attach(
+            pred_class_tester, "pc/recall_at"
+        )
+
+        ProgressBar(persist=True, desc="Pred class test").attach(pred_class_tester)
+
+        pred_class_tester.add_event_handler(
+            Events.EPOCH_COMPLETED,
+            log_metrics,
+            "Predicate classification test",
+            "test_gt",
+            json_logger,
+            tb_logger,
+            pred_class_trainer.global_step,
+        )
+        pred_class_tester.add_event_handler(
+            Events.EPOCH_COMPLETED,
+            PredicatePredictionLogger(
+                grid=(2, 3),
+                data_root=conf.dataset.folder,
+                tag="test_gt",
+                logger=tb_img_logger.writer,
+                metadata=dataset_metadata["test_gt"],
+                global_step_fn=pred_class_trainer.global_step,
+            ),
+        )
+        # endregion
+
+        # region Predicate detection testing callbacks
+        vr_predicate_tester.add_event_handler(
+            Events.ITERATION_COMPLETED,
+            VisualRelationRecallAt(type="predicate", steps=(50, 100)),
+        )
+        for step in (50, 100):
+            Average(
+                output_transform=itemgetter(f"vr/predicate/recall_at_{step}")
+            ).attach(vr_predicate_tester, f"vr/predicate/recall_at_{step}")
+
+        ProgressBar(persist=True, desc="Pred det test").attach(vr_predicate_tester)
+
+        vr_predicate_tester.add_event_handler(
+            Events.EPOCH_COMPLETED,
+            log_metrics,
+            "Predicate detection test",
+            "test_gt",
+            json_logger,
+            tb_logger,
+            pred_class_trainer.global_step,
+        )
+        vr_predicate_tester.add_event_handler(
+            Events.EPOCH_COMPLETED,
+            VisualRelationPredictionLogger(
+                grid=(2, 3),
+                data_root=conf.dataset.folder,
+                tag="with GT boxes",
+                logger=tb_img_logger.writer,
+                top_x_relations=conf.visual_relations.top_x_relations,
+                metadata=dataset_metadata["test_gt"],
+                global_step_fn=pred_class_trainer.global_step,
+            ),
+        )
+        # endregion
+
+        # region Phrase and relationship detection validation callbacks
+        ProgressBar(persist=True, desc="Phrase and relation det test").attach(
+            vr_phrase_and_relation_tester
+        )
+        vr_phrase_and_relation_tester.add_event_handler(
+            Events.ITERATION_COMPLETED,
+            VisualRelationRecallAt(type="phrase", steps=(50, 100)),
+        )
+        vr_phrase_and_relation_tester.add_event_handler(
+            Events.ITERATION_COMPLETED,
+            VisualRelationRecallAt(type="relationship", steps=(50, 100)),
+        )
+        for name in ["phrase", "relationship"]:
+            for step in (50, 100):
+                Average(
+                    output_transform=itemgetter(f"vr/{name}/recall_at_{step}")
+                ).attach(vr_phrase_and_relation_tester, f"vr/{name}/recall_at_{step}")
+        if conf.dataset.name == "hico":
+            HOImAP().attach(vr_phrase_and_relation_tester, "vr/hoi/mAP")
+
+        vr_phrase_and_relation_tester.add_event_handler(
+            Events.EPOCH_COMPLETED,
+            log_metrics,
+            "Phrase and relationship detection test",
+            "test_d2",
+            json_logger,
+            tb_logger,
+            pred_class_trainer.global_step,
+        )
+        vr_phrase_and_relation_tester.add_event_handler(
+            Events.EPOCH_COMPLETED,
+            VisualRelationPredictionLogger(
+                grid=(2, 3),
+                data_root=conf.dataset.folder,
+                tag="with D2 boxes",
+                logger=tb_img_logger.writer,
+                top_x_relations=conf.visual_relations.top_x_relations,
+                metadata=dataset_metadata["test_d2"],
+                global_step_fn=pred_class_trainer.global_step,
+            ),
+        )
+        # endregion
+
     # region Run
-    if conf.dataset.eager:
-        for d in datasets.values():
-            d.load_eager()
     log_effective_config(conf, pred_class_trainer, tb_logger)
-    max_epochs = conf.session.max_epochs
-    if "resume" in conf:
-        max_epochs += pred_class_trainer.state.epoch
-    pred_class_trainer.run(
-        dataloaders["train_gt"],
-        max_epochs=max_epochs,
-        seed=conf.session.seed,
-        epoch_length=len(dataloaders["train_gt"]),
-    )
+    if not ("resume" in conf and conf.resume.test_only):
+        if conf.dataset.eager:
+            for n, d in datasets.items():
+                if n.startswith(("train", "val")):
+                    d.load_eager()
+        max_epochs = conf.session.max_epochs
+        if "resume" in conf:
+            max_epochs += pred_class_trainer.state.epoch
+        pred_class_trainer.run(
+            dataloaders["train_gt"],
+            max_epochs=max_epochs,
+            seed=conf.session.seed,
+            epoch_length=len(dataloaders["train_gt"]),
+        )
+
+    if "test" in conf.dataset:
+        if conf.dataset.eager:
+            datasets["test_gt"].load_eager()
+            datasets["test_d2"].load_eager()
+        pred_class_tester.run(dataloaders["test_gt"])
+        vr_predicate_tester.run(dataloaders["test_gt"])
+        vr_phrase_and_relation_tester.run(dataloaders["test_d2"])
 
     add_session_end(tb_logger.writer, "SUCCESS")
     tb_logger.close()

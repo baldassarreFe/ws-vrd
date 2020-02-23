@@ -23,7 +23,7 @@ class MetricsHandler(BaseHandler):
         global_step = self.global_step_fn()
 
         for name, value in engine.state.metrics.items():
-            logger.writer.add_scalar(f"{self.tag}/{name}", value, global_step)
+            logger.writer.add_scalar(f"{self.tag}/{name}", value.item(), global_step)
 
 
 class OptimizerParamsHandler(_OptimizerParamsHandler):

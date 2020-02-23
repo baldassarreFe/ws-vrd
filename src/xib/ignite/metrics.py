@@ -23,24 +23,6 @@ from ..structures import ImageSize, Vocabulary, matched_boxlist_union
 from ..utils.utils import NamedEnumMixin
 
 
-class BatchMetric(Metric, ABC):
-    """A metric computed independently for every batch."""
-
-    def attach(self, engine, name):
-        # Reset at the beginning of every iteration
-        if not engine.has_event_handler(self.started, Events.ITERATION_STARTED):
-            engine.add_event_handler(Events.ITERATION_STARTED, self.started)
-        # Update at the after every iteration
-        if not engine.has_event_handler(
-            self.iteration_completed, Events.ITERATION_COMPLETED
-        ):
-            engine.add_event_handler(
-                Events.ITERATION_COMPLETED, self.iteration_completed
-            )
-        # Copy metric to engine.state.metrics after every iteration
-        engine.add_event_handler(Events.ITERATION_COMPLETED, self.completed, name)
-
-
 def mean_average_precision(annotations, scores) -> float:
     """Computes the mean average precision (mAP) for a multi-class multi-label scenario.
 
@@ -65,18 +47,17 @@ def mean_average_precision(annotations, scores) -> float:
     return np.nanmean(average_precisions).item()
 
 
-class MeanAveragePrecisionBatch(BatchMetric):
-    avg_precision: float
+class MeanAveragePrecisionBatch(object):
+    def __call__(self, engine: Engine):
+        y_true = engine.state.output["target"]
+        y_score = engine.state.output["output"]
+        avg_precision = mean_average_precision(y_true, y_score)
 
-    def reset(self):
-        self.avg_precision = float("NaN")
-
-    def update(self, output: Tuple[torch.Tensor, torch.Tensor]):
-        y_true, y_score = output
-        self.avg_precision = mean_average_precision(y_true, y_score)
-
-    def compute(self):
-        return self.avg_precision
+        # Return tensor so that ignite.metrics.Average takes batch size into account
+        avg_precision = torch.full(
+            (engine.state.batch[0].num_graphs, 1), fill_value=avg_precision
+        )
+        engine.state.output[f"pc/mAP"] = avg_precision
 
 
 class MeanAveragePrecisionEpoch(Metric):
@@ -194,34 +175,22 @@ def recall_at(annotations, scores, sizes):
     return result
 
 
-class RecallAtBatch(BatchMetric):
+class RecallAtBatch(object):
     """Recall@x over the output of the last batch"""
 
-    _recall_at: Dict[int, Optional[float]]
-
-    def __init__(
-        self,
-        sizes: Tuple[int, ...] = (10, 30, 50),
-        output_transform=lambda x: x,
-        device=None,
-    ):
+    def __init__(self, sizes: Tuple[int, ...] = (10, 30, 50)):
         self._sorted_sizes = list(sorted(sizes))
-        super(RecallAtBatch, self).__init__(output_transform, device)
 
-    def reset(self):
-        self._recall_at = {s: None for s in self._sorted_sizes}
+    def __call__(self, engine: Engine):
+        y_true = engine.state.output["target"]
+        y_score = engine.state.output["output"]
+        recalls = recall_at(y_true, y_score, self._sorted_sizes)
 
-    def update(self, output: Tuple[torch.Tensor, torch.Tensor]):
-        y_true, y_score = output
-        self._recall_at.update(recall_at(y_true, y_score, self._sorted_sizes))
-
-    def compute(self):
-        return self._recall_at
-
-    def completed(self, engine, name):
-        result = self.compute()
-        for k, v in result.items():
-            engine.state.metrics[f"{name}_{k}"] = v
+        # Return tensors so that ignite.metrics.Average takes batch size into account
+        engine.state.output["recalls"] = {}
+        for k, r in recalls.items():
+            r = torch.full((engine.state.batch[0].num_graphs, 1), fill_value=r)
+            engine.state.output["recalls"][f"pc/recall_at_{k}"] = r
 
 
 class RecallAtEpoch(Metric):
@@ -437,12 +406,11 @@ class VisualRelationPredictionLogger(object):
 
     def __call__(self, engine: Engine):
         global_step = self.global_step_fn()
-        relations = engine.state.output["relations"]
         targets = engine.state.batch[1]
         filenames = engine.state.batch[2]
+        relations = engine.state.output["relations"]
 
-        for mode in ("with_obj_scores", "no_obj_scores"):
-            self._log_relations(relations[mode], targets, filenames, global_step)
+        self._log_relations(relations, targets, filenames, global_step)
 
     def _log_relations(
         self,
@@ -660,7 +628,7 @@ class HOImAP(Metric):
         self.pred = []
 
     def update(self, output):
-        relations = output[0]["with_obj_scores"]
+        relations = output[0]
         targets = output[1]
 
         sizes = relations.n_edges.tolist()
@@ -737,12 +705,13 @@ class VisualRelationRecallAt(object):
     def __call__(self, engine: Engine):
         targets = engine.state.batch[1]
 
-        for mode in ("with_obj_scores", "no_obj_scores"):
-            predictions = engine.state.output["relations"][mode]
-            matches = self._compute_matches(predictions, targets)
-            recall_at = self._recall_at(predictions, targets, matches)
-            for k, r in recall_at.items():
-                engine.state.output[f"{self.matching_type}/{mode}/recall_at_{k}"] = r
+        predictions = engine.state.output["relations"]
+        matches = self._compute_matches(predictions, targets)
+        recall_at = self._recall_at(predictions, targets, matches)
+
+        for k, r in recall_at.items():
+            r = torch.full((predictions.num_graphs, 1), fill_value=r)
+            engine.state.output[f"vr/{self.matching_type}/recall_at_{k}"] = r
 
     @staticmethod
     def _predicate_detection(predictions: Batch, targets: Batch) -> torch.Tensor:

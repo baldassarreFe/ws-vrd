@@ -218,39 +218,28 @@ def add_hparam_summary(writer: SummaryWriter, hparams: OmegaConf):
         hparam_infos.append({"name": fullname, "type": type(value)})
 
     metric_infos = [
-        {"tag": "val/mAP", "display_name": "PC mAP", "dataset_type": "validation"},
         {
-            "tag": "val/recall_at_5",
+            "tag": "val_gt/pc/mAP",
+            "display_name": "PC mAP",
+            "dataset_type": "validation",
+        },
+        {
+            "tag": "val_gt/pc/recall_at_5",
             "display_name": "PC R@5",
             "dataset_type": "validation",
         },
         {
-            "tag": "val_vr/predicate/with_obj_scores/recall_at_50",
-            "display_name": "VR Pred S R@50",
-            "dataset_type": "validation",
-        },
-        {
-            "tag": "val_vr/phrase/with_obj_scores/recall_at_50",
-            "display_name": "VR Phrase S R@50",
-            "dataset_type": "validation",
-        },
-        {
-            "tag": "val_vr/relationship/with_obj_scores/recall_at_50",
-            "display_name": "VR Rel S R@50",
-            "dataset_type": "validation",
-        },
-        {
-            "tag": "val_vr/predicate/no_obj_scores/recall_at_50",
+            "tag": "val_gt/vr/predicate/recall_at_50",
             "display_name": "VR Pred R@50",
             "dataset_type": "validation",
         },
         {
-            "tag": "val_vr/phrase/no_obj_scores/recall_at_50",
+            "tag": "val_d2/vr/phrase/recall_at_50",
             "display_name": "VR Phrase R@50",
             "dataset_type": "validation",
         },
         {
-            "tag": "val_vr/relationship/no_obj_scores/recall_at_50",
+            "tag": "val_d2/vr/relationship/recall_at_50",
             "display_name": "VR Rel R@50",
             "dataset_type": "validation",
         },

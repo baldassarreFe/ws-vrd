@@ -41,6 +41,10 @@ session:
 visual_relations:
   top_k_predicates: 5
   top_x_relations: 100
+  activations: yes
+  channel_mean: yes
+  relevance_fn: relu_sum
+  object_scores: yes
 
 hparams:
   data--: ${dataset.name}
@@ -48,3 +52,7 @@ hparams:
   loss/rank--lrank: ${losses.rank.weight}
   opt/weight_decay--wd: ${optimizer.weight_decay}
   vr/topk--topk: ${visual_relations.top_k_predicates}
+  vr/act--vra: ${visual_relations.activations}
+  vr/chan_mean--vrcm: ${visual_relations.channel_mean}
+  vr/rel_fn--vrrf: ${visual_relations.relevance_fn}
+  vr/obj_score--vros: ${visual_relations.object_scores}
