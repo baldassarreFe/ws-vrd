@@ -1,0 +1,6 @@
+dataset:
+  test:
+    name: ${dataset.name}_relationship_detection_test
+
+resume:
+  test_only: yes
