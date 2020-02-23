@@ -302,6 +302,19 @@ def log_effective_config(conf, trainer, tb_logger):
         f.write(yaml)
 
 
+def epoch_filter(every: int):
+    """Ignite event filter that runs every X events or when the engine is terminating"""
+
+    def f(engine: Engine, event: int):
+        return (
+            engine.state.epoch % every == 0
+            or engine.state.epoch == engine.state.max_epochs
+            or engine.should_terminate
+        )
+
+    return f
+
+
 @logger.catch(reraise=True)
 def main():
     # region Setup
@@ -435,11 +448,11 @@ def main():
         lambda _: pred_class_validator.run(dataloaders["val_gt"]),
     )
     pred_class_trainer.add_event_handler(
-        Events.EPOCH_COMPLETED(every=3),
+        Events.EPOCH_COMPLETED(epoch_filter(5)),
         lambda _: vr_predicate_validator.run(dataloaders["val_gt"]),
     )
     pred_class_trainer.add_event_handler(
-        Events.EPOCH_COMPLETED(every=3),
+        Events.EPOCH_COMPLETED(epoch_filter(5)),
         lambda _: vr_phrase_and_relation_validator.run(dataloaders["val_d2"]),
     )
     # endregion
