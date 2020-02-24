@@ -1,0 +1,7 @@
+model:
+  name: xib.models.baseline.build_baseline
+  classifier:
+    last_bias: yes
+
+hparams:
+  model/readout_bias--rb: ${model.classifier.last_bias}

@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import textwrap
-from abc import ABC
 from enum import Enum
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Union, Iterator, Callable, Sequence
 
-import cv2
 import numpy as np
 import pandas as pd
 import sklearn.metrics
 import torch
+from PIL import Image
 from detectron2.data.catalog import Metadata
-from ignite.engine import Events, Engine
+from ignite.engine import Engine
 from ignite.metrics import Metric
 from tensorboardX import SummaryWriter
 from torch_geometric.data import Batch
@@ -44,6 +43,9 @@ def mean_average_precision(annotations, scores) -> float:
             y_true=annotations, y_score=scores, average=None
         )
 
+    if np.isnan(average_precisions).all():
+        return 0
+
     return np.nanmean(average_precisions).item()
 
 
@@ -54,9 +56,8 @@ class MeanAveragePrecisionBatch(object):
         avg_precision = mean_average_precision(y_true, y_score)
 
         # Return tensor so that ignite.metrics.Average takes batch size into account
-        avg_precision = torch.full(
-            (engine.state.batch[0].num_graphs, 1), fill_value=avg_precision
-        )
+        B = len(y_true)
+        avg_precision = torch.full((B, 1), fill_value=avg_precision)
         engine.state.output[f"pc/mAP"] = avg_precision
 
 
@@ -166,9 +167,11 @@ def recall_at(annotations, scores, sizes):
     cumsum = annotations_of_top_max_s.cumsum(dim=1).float()
 
     # Divide each row by the total number of relevant document for that row to get the recall per sample.
+    # If there are 0 relevant documents we'd get NaN, which can be set to 0.
     # Then take the batch mean.
     num_rel = annotations.sum(dim=1, keepdims=True)
     recall = cumsum / num_rel
+    recall[torch.isnan(recall)] = 0.0
     for s in sizes:
         result[s] = recall[:, s - 1].mean(axis=0).item()
 
@@ -187,9 +190,10 @@ class RecallAtBatch(object):
         recalls = recall_at(y_true, y_score, self._sorted_sizes)
 
         # Return tensors so that ignite.metrics.Average takes batch size into account
+        B = len(y_true)
         engine.state.output["recalls"] = {}
         for k, r in recalls.items():
-            r = torch.full((engine.state.batch[0].num_graphs, 1), fill_value=r)
+            r = torch.full((B, 1), fill_value=r)
             engine.state.output["recalls"][f"pc/recall_at_{k}"] = r
 
 
@@ -281,15 +285,18 @@ class PredicatePredictionLogger(object):
         for target, pred, filename, ax in zip(
             targets_bce, predicate_probs, filenames, axes_iter
         ):
-            image = cv2.imread(self.img_dir.joinpath(filename).as_posix())
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            img_size = ImageSize(*image.shape[:2])
+            # Some images are black and white, make sure they are read as RBG
+            image = Image.open(self.img_dir.joinpath(filename)).convert("RGB")
+            img_size = ImageSize(image.size[1], image.size[0])
+            image = np.asarray(image)
 
             recall_at_5 = recall_at(target[None, :], pred[None, :], (5,))[5]
             mAP = mean_average_precision(target[None, :], pred[None, :])
 
             ax.imshow(image)
-            ax.set_title(f"{filename[:-4]} mAP {mAP:.1%} R@5 {recall_at_5:.1%}")
+            ax.set_title(
+                f"{Path(filename).name[:-4]} mAP {mAP:.1%} R@5 {recall_at_5:.1%}"
+            )
 
             target_str = self.predicate_vocabulary.get_str(
                 target.nonzero().flatten()
@@ -344,7 +351,6 @@ class PredicatePredictionLogger(object):
 
         if self.save_dir is not None:
             import io
-            from PIL import Image
 
             with io.BytesIO() as buff:
                 fig.savefig(

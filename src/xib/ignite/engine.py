@@ -74,7 +74,6 @@ class Trainer(CustomEngine):
         super(Trainer, self).__init__(process_function, conf)
         self.add_event_handler(Events.STARTED, Trainer._patch_state)
         self.add_event_handler(Events.EPOCH_STARTED, Trainer.setup_training)
-        self.add_event_handler(Events.ITERATION_COMPLETED, Trainer._increment_samples)
 
     def global_step(self, *_, **__):
         """Return the global step based on how many samples have been processed.
@@ -88,11 +87,6 @@ class Trainer(CustomEngine):
         """Customize the ignite.engine.State instance that is created after calling ignite.Engine.run
         """
         trainer.state.samples = getattr(trainer.state, "samples", 0)
-
-    @staticmethod
-    def _increment_samples(trainer: Trainer):
-        graphs: Batch = trainer.state.batch[0]
-        trainer.state.samples += graphs.num_graphs
 
     def load_state_dict(self, state_dict):
         # Make sure state.samples is deserialized when `Engine.load_state_dict()` is called

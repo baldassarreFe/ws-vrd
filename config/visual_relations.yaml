@@ -1,0 +1,14 @@
+visual_relations:
+  top_k_predicates: 10
+  top_x_relations: 100
+  activations: yes
+  channel_mean: no
+  relevance_fn: l1
+  object_scores: yes
+
+hparams:
+  vr/topk--topk: ${visual_relations.top_k_predicates}
+  vr/act--vra: ${visual_relations.activations}
+  vr/chan_mean--vrcm: ${visual_relations.channel_mean}
+  vr/rel_fn--vrrf: ${visual_relations.relevance_fn}
+  vr/obj_score--vros: ${visual_relations.object_scores}

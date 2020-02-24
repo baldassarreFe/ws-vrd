@@ -2,17 +2,26 @@ from __future__ import annotations
 
 import random
 from enum import Enum
-from typing import Tuple, Union, Optional, Callable
+from typing import Tuple, Union, Optional, Callable, Sequence, Any, Dict
 
 import torch.utils
 import torch.utils.data
+from PIL import Image
+from detectron2.data.catalog import Metadata
 from loguru import logger
 from torch_geometric.data import Data
+from torchvision.transforms import (
+    Resize,
+    Compose,
+    Normalize,
+    ToTensor,
+    RandomResizedCrop,
+)
 
-from .sample import VrSample
-from .folder import DatasetFolder
 from xib.structures.instances import to_data_dict as instance_to_data_dict
 from xib.utils import NamedEnumMixin
+from .folder import DatasetFolder
+from .sample import VrSample
 
 
 class VrDataset(torch.utils.data.Dataset):
@@ -36,11 +45,13 @@ class VrDataset(torch.utils.data.Dataset):
         self,
         folder: DatasetFolder,
         input_mode: Union[str, InputMode],
-        transforms: Optional[Callable] = None,
+        metadata: Metadata,
+        transforms: Optional[Sequence[Callable]] = None,
     ):
         self.input_mode = VrDataset.InputMode.get(input_mode)
         self.folder = folder
-        self.transforms = transforms
+        self.metadata = metadata
+        self.transforms = transforms if transforms is not None else []
         self._blacklist = set()
 
     def __len__(self):
@@ -54,8 +65,8 @@ class VrDataset(torch.utils.data.Dataset):
 
         input_graph, target_graph = self.make_graphs(sample)
 
-        if self.transforms is not None:
-            input_graph, target_graph = self.transforms(input_graph, target_graph)
+        for t in self.transforms:
+            input_graph, target_graph = t(input_graph, target_graph)
 
         if input_graph.num_nodes == 0:
             # If a graph has 0 nodes and it's put last in the the batch formed by
@@ -132,3 +143,42 @@ class VrDataset(torch.utils.data.Dataset):
         """
 
         return input_graph, target_graph
+
+
+class PcDataset(torch.utils.data.Dataset):
+    def __init__(
+        self, data_dicts: Sequence[Dict[str, Any]], metadata: Metadata, transforms=None
+    ):
+        self.data_dicts = data_dicts
+        self.metadata = metadata
+        self.num_classes = len(metadata.predicate_classes)
+        self.transforms = Compose(
+            [
+                *(transforms if transforms is not None else []),
+                ToTensor(),
+                Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ]
+        )
+
+    def __len__(self):
+        return len(self.data_dicts)
+
+    def __getitem__(self, item):
+        d = self.data_dicts[item]
+
+        img = Image.open(d["file_name"]).convert("RGB")
+        img = self.transforms(img)
+
+        unique_predicates = torch.tensor(
+            list(set(r["category_id"] for r in d["relations"])), dtype=torch.long
+        )
+        target_bce = torch.zeros(self.num_classes, dtype=torch.float).scatter_(
+            dim=0, index=unique_predicates, value=1.0
+        )
+        target_rank = torch.constant_pad_nd(
+            unique_predicates,
+            pad=(0, self.num_classes - len(unique_predicates)),
+            value=-1,
+        )
+
+        return img, {"bce": target_bce, "rank": target_rank}, d["file_name"]
