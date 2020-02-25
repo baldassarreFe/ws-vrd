@@ -4,7 +4,6 @@ import random
 import socket
 import textwrap
 import time
-from functools import partial
 from operator import itemgetter
 from pathlib import Path
 from typing import Callable, Tuple, Any, Dict, Mapping, Optional
@@ -24,26 +23,22 @@ from loguru import logger
 from omegaconf import OmegaConf
 from torch.optim.optimizer import Optimizer
 from torch.utils.data import Dataset, DataLoader
-from torch_geometric.data import Batch
 from torchvision.transforms import RandomResizedCrop, Resize, CenterCrop
 
 from xib.datasets import PcDataset
 from .config import parse_args
-from .datasets import DatasetFolder, VrDataset, register_datasets
-from .ignite import HOImAP
+from .datasets import register_datasets
 from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch
-from .ignite import MetricsHandler, OptimizerParamsHandler, EpochHandler
+from .ignite import OptimizerParamsHandler, EpochHandler
 from .ignite import PredicatePredictionLogger
 from .ignite import RecallAtBatch, RecallAtEpoch
 from .ignite import Trainer, Validator
-from .ignite import VisualRelationPredictionLogger, VisualRelationRecallAt
 from .logging import setup_logging, add_logfile, add_custom_scalars
 from .logging.hyperparameters import (
     add_hparam_summary,
     add_session_start,
     add_session_end,
 )
-from .models.visual_relations_explainer import VisualRelationExplainer
 from .utils import import_
 
 

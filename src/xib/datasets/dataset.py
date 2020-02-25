@@ -66,14 +66,23 @@ class VrDataset(torch.utils.data.Dataset):
         input_graph, target_graph = self.make_graphs(sample)
 
         for t in self.transforms:
-            input_graph, target_graph = t(input_graph, target_graph)
+            input_graph, target_graph = t(input_graph, target_graph, sample.filename)
 
-        if input_graph.num_nodes == 0:
+        if input_graph.n_nodes == 0:
             # If a graph has 0 nodes and it's put last in the the batch formed by
             # Batch.from_data_list(...) it will cause a miscount in batch.num_graphs
-            logger.warning(f"Blacklisting graph without nodes for: {sample.filename}")
+            logger.warning(f"Blacklisting graph without nodes: {sample.filename}")
             self._blacklist.add(item)
             return self[random.randrange(0, len(self))]
+
+        if input_graph.n_edges == 0:
+            if self.metadata.name.endswith("train"):
+                # If a graph has 0 edges it's useless for training
+                logger.warning(f"Blacklisting graph without edges: {sample.filename}")
+                self._blacklist.add(item)
+                return self[random.randrange(0, len(self))]
+            else:
+                logger.warning(f"Found a graph without edges: {sample.filename}")
 
         # torch_geometric does not support string attributes when collating
         return input_graph, target_graph, sample.filename

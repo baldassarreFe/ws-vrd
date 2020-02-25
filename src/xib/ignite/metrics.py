@@ -25,7 +25,7 @@ from ..utils.utils import NamedEnumMixin
 def mean_average_precision(annotations, scores) -> float:
     """Computes the mean average precision (mAP) for a multi-class multi-label scenario.
 
-    In object detection mAP is the average AP across all classes, i.e.
+    In object detection mAP is the mean AP across all classes, i.e.
     for each class c, compute AP[c] using all samples in the dataset, then take the average across classes.
 
     Not to bo confounded with:
@@ -84,6 +84,10 @@ def precision_at(annotations, scores, sizes):
     - rank the relationships by their score and keep the top x
     - compute how many of those retrieved relationships are actually relevant
 
+    Args:
+        annotations: tensor of shape [num_samples, num_relationships] and values {0, 1}
+        scores: tensor of shape [num_samples, num_relationships] and float scores
+
     ::
 
                   # ( relevant items retrieved )
@@ -110,9 +114,13 @@ def precision_at(annotations, scores, sizes):
     cumsum = annotations_of_top_max_s.cumsum(dim=1).float()
 
     # Given a size s, `cumsum[i, s-1] / s` gives the precision for sample i.
+    # If we end up doing 0 / 0, it simply means that in the top-s documents
+    # there was no relevant document, so precision should be 0.
     # Then we take the batch mean.
     for s in sizes:
-        result[s] = (cumsum[:, (s - 1)] / s).mean(dim=0).item()
+        precision_per_sample = cumsum[:, (s - 1)] / s
+        precision_per_sample[torch.isnan(precision_per_sample)] = 0.
+        result[s] = precision_per_sample.mean(dim=0).item()
 
     return result
 
@@ -128,6 +136,10 @@ def recall_at(annotations, scores, sizes):
                 # ( relevant items retrieved )
       Recall  = ------------------------------ = P ( retrieved | relevant )
                      # ( relevant items )
+
+    Args:
+        annotations: tensor of shape [num_samples, num_relationships] and values {0, 1}
+        scores: tensor of shape [num_samples, num_relationships] and float scores
 
     References:
 
@@ -147,6 +159,7 @@ def recall_at(annotations, scores, sizes):
             We compute recall @ x which corresponds to the proportion of ground truth
             pairs among the x top scored candidate pairs in each image.
     """
+
     result = {}
     # Sorted labels are the indexes that would sort y_score, e.g.
     # [[ 10, 3, 4, ....., 5, 41 ],
@@ -163,17 +176,20 @@ def recall_at(annotations, scores, sizes):
     )
 
     # cumsum[i, j] = number of relevant items within the top j+1 retrieved items
-    # Cast to float to avoid int/int division.
+    # Cast to float to avoid int/int division later.
     cumsum = annotations_of_top_max_s.cumsum(dim=1).float()
 
-    # Divide each row by the total number of relevant document for that row to get the recall per sample.
-    # If there are 0 relevant documents we'd get NaN, which can be set to 0.
-    # Then take the batch mean.
-    num_rel = annotations.sum(dim=1, keepdims=True)
-    recall = cumsum / num_rel
-    recall[torch.isnan(recall)] = 0.0
+    # Divide each row (a sample) by the total number of relevant document for
+    # that row, to get the recall per sample.
+    # If for a specific sample there are 0 relevant documents we get NaN in the division.
+    # Last, take the batch mean skipping NaN values.
+    # If we get a batch where all documents have 0 relevant documents, it's a problem.
+    num_relevant_per_sample = annotations.sum(dim=1, keepdims=True)
+    recall_per_sample = cumsum / num_relevant_per_sample
     for s in sizes:
-        result[s] = recall[:, s - 1].mean(axis=0).item()
+        recall_at_s_per_sample = recall_per_sample[:, s - 1]
+        finite = torch.isfinite(recall_at_s_per_sample)
+        result[s] = recall_at_s_per_sample[finite].mean(dim=0).item()
 
     return result
 
@@ -614,7 +630,7 @@ class VisualRelationPredictionLogger(object):
         #     self.logger.add_figure(f'{self.tag}', fig, global_step=global_step, close=True)
 
 
-class HOImAP(Metric):
+class HoiClassificationMeanAvgPrecision(Metric):
     """Mean Average Precision over the 600 human-object interactions defined in HICO.
 
     A human-object interaction is a triplet (person, predicate, object). This mAP is
@@ -678,6 +694,7 @@ class HOImAP(Metric):
     def compute(self):
         from xib.datasets.hico_det.metadata import HOI
 
+        # These dataframes have shape [num_images, num_hois]
         gt = (
             pd.DataFrame(self.gt)
             .fillna(False, downcast={object: bool})

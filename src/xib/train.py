@@ -28,7 +28,7 @@ from torch_geometric.data import Batch
 
 from .config import parse_args
 from .datasets import DatasetFolder, VrDataset, register_datasets
-from .ignite import HOImAP
+from .ignite import HoiClassificationMeanAvgPrecision
 from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch
 from .ignite import MetricsHandler, OptimizerParamsHandler, EpochHandler
 from .ignite import PredicatePredictionLogger
@@ -183,6 +183,7 @@ def build_datasets(
     register_datasets(conf.folder)
 
     metadata = {}
+    transforms = []
 
     if "trainval" in conf:
         metadata["train_gt"] = metadata["val_gt"] = metadata[
@@ -211,29 +212,68 @@ def build_datasets(
     )
 
     def make_bce_and_rank_targets(
-        input_graph: Batch, target_graph: Batch, *, num_classes
+        input_graph: Batch, target_graph: Batch, filename: str, *, num_classes
     ):
         """Binary and rank encoding of unique predicates"""
-        unique_preds = torch.unique(target_graph.predicate_classes, sorted=False)
+        unique_predicates = torch.unique(target_graph.predicate_classes, sorted=False)
         target_graph.predicate_bce = (
             torch.zeros(num_classes, dtype=torch.float)
-            .scatter_(dim=0, index=unique_preds, value=1.0)
+            .scatter_(dim=0, index=unique_predicates, value=1.0)
             .view(1, -1)
         )
         target_graph.predicate_rank = torch.constant_pad_nd(
-            unique_preds, pad=(0, num_classes - len(unique_preds)), value=-1
+            unique_predicates, pad=(0, num_classes - len(unique_predicates)), value=-1
         ).view(1, -1)
         return input_graph, target_graph
 
-    make_targets = partial(
-        make_bce_and_rank_targets,
-        num_classes=len(metadata["train_gt"].predicate_classes),
+    def keep_human_object_interactions(
+        input_graph: Batch, target_graph: Batch, filename: str, *, human_class: int
+    ):
+        subjs = input_graph.object_classes[input_graph.relation_indexes[0]]
+        keep = subjs == human_class
+
+        input_graph.n_edges = keep.sum().item()
+        input_graph.relation_indexes = input_graph.relation_indexes[:, keep]
+        input_graph.relation_linear_features = input_graph.relation_linear_features[
+            keep
+        ]
+
+        return input_graph, target_graph
+
+    transforms.append(
+        partial(
+            make_bce_and_rank_targets,
+            num_classes=len(metadata["train_gt"].predicate_classes),
+        )
     )
 
+    if conf.graph_type == "human-object":
+        transforms.append(
+            partial(
+                keep_human_object_interactions,
+                human_class=metadata["train_gt"].thing_classes.index("person"),
+            )
+        )
+
     datasets = {
-        "train_gt": VrDataset(train_folder, input_mode="GT", transforms=make_targets),
-        "val_gt": VrDataset(val_folder, input_mode="GT", transforms=make_targets),
-        "val_d2": VrDataset(val_folder, input_mode="D2", transforms=make_targets),
+        "train_gt": VrDataset(
+            train_folder,
+            input_mode="GT",
+            transforms=transforms,
+            metadata=metadata["train_gt"],
+        ),
+        "val_gt": VrDataset(
+            val_folder,
+            input_mode="GT",
+            transforms=transforms,
+            metadata=metadata["val_gt"],
+        ),
+        "val_d2": VrDataset(
+            val_folder,
+            input_mode="D2",
+            transforms=transforms,
+            metadata=metadata["val_d2"],
+        ),
     }
 
     if "test" in conf:
@@ -242,10 +282,16 @@ def build_datasets(
         test_folder = DatasetFolder.from_folder(test_path, suffix=".graph.pth")
         logger.info(f"Test split: {len(test_folder)} test")
         datasets["test_gt"] = VrDataset(
-            test_folder, input_mode="GT", transforms=make_targets
+            test_folder,
+            input_mode="GT",
+            transforms=transforms,
+            metadata=metadata["test_gt"],
         )
         datasets["test_d2"] = VrDataset(
-            test_folder, input_mode="D2", transforms=make_targets
+            test_folder,
+            input_mode="D2",
+            transforms=transforms,
+            metadata=metadata["test_d2"],
         )
 
     return datasets, metadata
@@ -428,7 +474,13 @@ def main():
     # endregion
 
     # region Predicate classification training callbacks
-    ProgressBar(persist=True, desc="Pred class train").attach(
+    def increment_samples(trainer: Trainer):
+        graphs: Batch = trainer.state.batch[0]
+        trainer.state.samples += graphs.num_graphs
+
+    pred_class_trainer.add_event_handler(Events.ITERATION_COMPLETED, increment_samples)
+
+    ProgressBar(persist=True, desc="[train] Predicate classification").attach(
         pred_class_trainer, output_transform=itemgetter("losses")
     )
 
@@ -509,7 +561,7 @@ def main():
     # endregion
 
     # region Predicate classification validation callbacks
-    ProgressBar(persist=True, desc="Pred class val").attach(pred_class_validator)
+    ProgressBar(persist=True, desc="[val] Predicate classification").attach(pred_class_validator)
 
     if conf.losses["bce"]["weight"] > 0:
         Average(output_transform=lambda o: o["losses"]["loss/bce"]).attach(
@@ -594,7 +646,7 @@ def main():
             vr_predicate_validator, f"vr/predicate/recall_at_{step}"
         )
 
-    ProgressBar(persist=True, desc="Pred det val").attach(vr_predicate_validator)
+    ProgressBar(persist=True, desc="[val] Predicate detection").attach(vr_predicate_validator)
 
     vr_predicate_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
@@ -620,7 +672,7 @@ def main():
     # endregion
 
     # region Phrase and relationship detection validation callbacks
-    ProgressBar(persist=True, desc="Phrase and relation det val").attach(
+    ProgressBar(persist=True, desc="[val] Phrase and relation detection").attach(
         vr_phrase_and_relation_validator
     )
     vr_phrase_and_relation_validator.add_event_handler(
@@ -637,7 +689,7 @@ def main():
                 vr_phrase_and_relation_validator, f"vr/{name}/recall_at_{step}"
             )
     if conf.dataset.name == "hico":
-        HOImAP().attach(vr_phrase_and_relation_validator, "vr/hoi/mAP")
+        HoiClassificationMeanAvgPrecision().attach(vr_phrase_and_relation_validator, "vr/hoi/mAP")
 
     vr_phrase_and_relation_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
@@ -686,7 +738,7 @@ def main():
             pred_class_tester, "pc/recall_at"
         )
 
-        ProgressBar(persist=True, desc="Pred class test").attach(pred_class_tester)
+        ProgressBar(persist=True, desc="[test] Predicate classification").attach(pred_class_tester)
 
         pred_class_tester.add_event_handler(
             Events.EPOCH_COMPLETED,
@@ -720,7 +772,7 @@ def main():
                 output_transform=itemgetter(f"vr/predicate/recall_at_{step}")
             ).attach(vr_predicate_tester, f"vr/predicate/recall_at_{step}")
 
-        ProgressBar(persist=True, desc="Pred det test").attach(vr_predicate_tester)
+        ProgressBar(persist=True, desc="[test] Predicate detection").attach(vr_predicate_tester)
 
         vr_predicate_tester.add_event_handler(
             Events.EPOCH_COMPLETED,
@@ -746,7 +798,7 @@ def main():
         # endregion
 
         # region Phrase and relationship detection validation callbacks
-        ProgressBar(persist=True, desc="Phrase and relation det test").attach(
+        ProgressBar(persist=True, desc="[test] Phrase and relation detection").attach(
             vr_phrase_and_relation_tester
         )
         vr_phrase_and_relation_tester.add_event_handler(
@@ -763,7 +815,7 @@ def main():
                     output_transform=itemgetter(f"vr/{name}/recall_at_{step}")
                 ).attach(vr_phrase_and_relation_tester, f"vr/{name}/recall_at_{step}")
         if conf.dataset.name == "hico":
-            HOImAP().attach(vr_phrase_and_relation_tester, "vr/hoi/mAP")
+            HoiClassificationMeanAvgPrecision().attach(vr_phrase_and_relation_tester, "vr/hoi/mAP")
 
         vr_phrase_and_relation_tester.add_event_handler(
             Events.EPOCH_COMPLETED,

@@ -266,8 +266,8 @@ class OutputGlobalModel(nn.Module):
     ) -> torch.Tensor:
         # If a graph has no edges, i.e. len(edge_to_graph_idx.unique()) != num_graphs:
         # - if it also has 0 nodes it can cause a bug (see dataloader)
-        # - if it has only 1 node, scatter max will fill its global vector with zeros
-        #   and the fully connected layer simply apply the bias term
+        # - if it has only 1 node, scatter max will fill its global vector with zeros,
+        #   then the fully connected layer will simply apply the bias (if present)
         edge_to_graph_idx = node_to_graph_idx[edge_indices[0]]
 
         if self.mode is OutputGlobalModel.ReadoutMode.FC_AGG:

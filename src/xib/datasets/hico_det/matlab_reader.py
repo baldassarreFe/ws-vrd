@@ -247,8 +247,20 @@ class HicoDetMatlabLoader(object):
         relation_indexes: torch.LongTensor,
         nms_threshold: float,
     ):
+        # Boxes are candidate for merging if their IoU is above a threshold
         iou_above_thres = pairwise_iou(boxes, boxes) > nms_threshold
-        iou_above_thres[classes[:, None] != classes[None, :]] = False
+
+        # Also, they have to belong to the same class to be candidates.
+        # Here we treat "person subj" and "person obj" as two
+        # separate classes, to avoid merging cases of "person hugs person"
+        # where the two people have high overlap but must remain separate
+        obj_idx = relation_indexes[1]
+        obj_is_person = classes[obj_idx] == 0
+        classes_tmp = classes.clone()
+        classes_tmp[obj_idx[obj_is_person]] = -1
+        same_class = classes_tmp[:, None] == classes_tmp[None, :]
+
+        candidates = iou_above_thres & same_class
 
         keep = []
         visited = torch.full((len(boxes),), False, dtype=torch.bool)
@@ -261,7 +273,7 @@ class HicoDetMatlabLoader(object):
             keep.append(old_box_idx)
 
             matches = torch.nonzero(
-                iou_above_thres[old_box_idx, :] & ~visited, as_tuple=True
+                candidates[old_box_idx, :] & ~visited, as_tuple=True
             )[0]
             visited[matches] = True
 

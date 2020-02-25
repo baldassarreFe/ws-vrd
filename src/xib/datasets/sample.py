@@ -1,6 +1,6 @@
 import dataclasses
 from pathlib import Path
-from typing import Union, Optional, Dict
+from typing import Union, Optional, Dict, Any, Mapping
 
 import torch
 from detectron2.structures import Instances
@@ -8,6 +8,10 @@ from detectron2.structures import Instances
 from xib.structures import ImageSize
 from xib.structures import VisualRelations
 from xib.structures import Vocabulary
+from xib.structures.instances import (
+    to_data_dict as instance_to_data_dict,
+    from_data_dict as instance_from_data_dict,
+)
 
 
 @dataclasses.dataclass
@@ -29,6 +33,50 @@ class VrSample(object):
     def __post_init__(self):
         if not isinstance(self.img_size, ImageSize):
             self.img_size = ImageSize(*self.img_size)
+
+    def to_data_dict(self):
+        res = {"filename": self.filename, "img_size": tuple(self.img_size)}
+
+        if self.gt_instances is not None:
+            res["gt_instances"] = instance_to_data_dict(self.gt_instances)
+        if self.gt_visual_relations is not None:
+            res["gt_visual_relations"] = self.gt_visual_relations.to_data_dict()
+        if self.gt_visual_relations_full is not None:
+            res[
+                "gt_visual_relations_full"
+            ] = self.gt_visual_relations_full.to_data_dict()
+
+        if self.d2_instances is not None:
+            res["d2_instances"] = instance_to_data_dict(self.d2_instances)
+        if self.d2_feature_pyramid is not None:
+            res["d2_feature_pyramid"] = self.d2_feature_pyramid
+        if self.d2_visual_relations_full is not None:
+            res[
+                "d2_visual_relations_full"
+            ] = self.d2_visual_relations_full.to_data_dict()
+
+    @classmethod
+    def from_data_dict(cls, dict: Mapping[str, Any]):
+        res = cls(dict["filename"], dict["img_size"])
+        if "gt_instances" in dict:
+            res.gt_instances = instance_from_data_dict(dict["gt_instances"])
+        if "gt_visual_relations" in dict:
+            res.gt_visual_relations = VisualRelations.from_data_dict(
+                dict["gt_visual_relations"]
+            )
+        if "gt_visual_relations_full" in dict:
+            res.gt_visual_relations_full = VisualRelations.from_data_dict(
+                dict["gt_visual_relations_full"]
+            )
+
+        if "d2_instances" in dict:
+            res.d2_instances = instance_from_data_dict(dict["d2_instances"])
+        if "d2_feature_pyramid" in dict is not None:
+            res.d2_feature_pyramid = dict["d2_feature_pyramid"]
+        if "d2_visual_relations_full" in dict:
+            res.d2_visual_relations_full = VisualRelations.from_data_dict(
+                dict["d2_visual_relations_full"]
+            )
 
     @staticmethod
     def load_image(filename, img_dir):
