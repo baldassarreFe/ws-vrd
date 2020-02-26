@@ -26,6 +26,7 @@ from torch.optim.optimizer import Optimizer
 from torch.utils.data import Dataset, DataLoader
 from torch_geometric.data import Batch
 
+from xib.ignite import HoiDetectionMeanAvgPrecision
 from .config import parse_args
 from .datasets import DatasetFolder, VrDataset, register_datasets
 from .ignite import HoiClassificationMeanAvgPrecision
@@ -555,7 +556,7 @@ def main():
         lambda _: vr_predicate_validator.run(dataloaders["val_gt"]),
     )
     pred_class_trainer.add_event_handler(
-        Events.EPOCH_COMPLETED(epoch_filter(5)),
+        Events.EPOCH_COMPLETED(epoch_filter(2)),
         lambda _: vr_phrase_and_relation_validator.run(dataloaders["val_d2"]),
     )
     # endregion
@@ -689,7 +690,8 @@ def main():
                 vr_phrase_and_relation_validator, f"vr/{name}/recall_at_{step}"
             )
     if conf.dataset.name == "hico":
-        HoiClassificationMeanAvgPrecision().attach(vr_phrase_and_relation_validator, "vr/hoi/mAP")
+        HoiClassificationMeanAvgPrecision().attach(vr_phrase_and_relation_validator, "pc/hoi/mAP")
+        HoiDetectionMeanAvgPrecision().attach(vr_phrase_and_relation_validator, "vr/hoi/mAP")
 
     vr_phrase_and_relation_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
@@ -797,7 +799,7 @@ def main():
         )
         # endregion
 
-        # region Phrase and relationship detection validation callbacks
+        # region Phrase and relationship detection testing callbacks
         ProgressBar(persist=True, desc="[test] Phrase and relation detection").attach(
             vr_phrase_and_relation_tester
         )
@@ -815,7 +817,8 @@ def main():
                     output_transform=itemgetter(f"vr/{name}/recall_at_{step}")
                 ).attach(vr_phrase_and_relation_tester, f"vr/{name}/recall_at_{step}")
         if conf.dataset.name == "hico":
-            HoiClassificationMeanAvgPrecision().attach(vr_phrase_and_relation_tester, "vr/hoi/mAP")
+            HoiClassificationMeanAvgPrecision().attach(vr_phrase_and_relation_tester, "pc/hoi/mAP")
+            HoiDetectionMeanAvgPrecision().attach(vr_phrase_and_relation_tester, "vr/hoi/mAP")
 
         vr_phrase_and_relation_tester.add_event_handler(
             Events.EPOCH_COMPLETED,
