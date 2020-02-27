@@ -145,6 +145,16 @@ python -m xib.preprocessing.vrd \
   - 100 objects
 - 213 Mb (in matlab)
 
+```bash
+cd data/unrel/raw
+
+wget https://www.di.ens.fr/willow/research/unrel/data/unrel-dataset.tar.gz
+md5sum unrel-dataset.tar.gz    
+# c6c2b20f3b4c6b5a85f070898fa5b5c1  unrel-dataset.tar.gz
+
+tar xvf unrel-dataset.tar.gz
+```
+
 ## COCO-a
 - Subset of COCO
 - 4413 images
