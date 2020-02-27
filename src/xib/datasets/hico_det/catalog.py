@@ -1,11 +1,14 @@
+from functools import partial
 from pathlib import Path
 from typing import Any, Dict, List, Union
 
 from PIL import UnidentifiedImageError
+from detectron2.data import DatasetCatalog, MetadataCatalog
 from detectron2.structures import BoxMode
 from loguru import logger
 
 from .matlab_reader import HicoDetMatlabLoader
+from .metadata import OBJECTS, PREDICATES
 from ..common import img_size_with_exif
 
 
@@ -136,13 +139,25 @@ def get_relationship_detection_dicts(root: Path, split: str) -> List[Dict[str, A
 
 
 def register_hico(data_root: Union[str, Path]):
-    from .metadata import OBJECTS, PREDICATES
-    from functools import partial
-    from detectron2.data import DatasetCatalog, MetadataCatalog
+    data_root = Path(data_root).expanduser().resolve()
+    raw = data_root / "hico_20160224_det" / "raw"
+    processed = data_root / "hico_20160224_det" / "processed"
 
-    raw = Path(data_root).expanduser().resolve() / "hico_20160224_det" / "raw"
+    metadata_common = dict(
+        thing_classes=OBJECTS.words,
+        predicate_classes=PREDICATES.words,
+        object_linear_features=3 + len(OBJECTS.words),
+        edge_linear_features=10,
+        raw=raw,
+        processed=processed,
+        matlab_root=raw / f"anno_bbox.mat",
+    )
 
-    for split in ["train", "test"]:
+    MetadataCatalog.get(f"hico_relationship_detection").set(
+        splits=("train", "test"), **metadata_common
+    )
+
+    for split in metadata_common["splits"]:
         DatasetCatalog.register(
             f"hico_object_detection_{split}",
             partial(get_object_detection_dicts, raw, split),
@@ -153,16 +168,12 @@ def register_hico(data_root: Union[str, Path]):
         )
         MetadataCatalog.get(f"hico_object_detection_{split}").set(
             thing_classes=OBJECTS.words,
-            image_root=f"hico_20160224_det/raw/images/{split}2015",
-            matlab_root=f"hico_20160224_det/raw/anno_bbox.mat",
+            image_root=raw / f"images/{split}2015",
+            matlab_root=raw / f"anno_bbox.mat",
             evaluator_type="coco",
         )
         MetadataCatalog.get(f"hico_relationship_detection_{split}").set(
-            thing_classes=OBJECTS.words,
-            predicate_classes=PREDICATES.words,
-            object_linear_features=3 + len(OBJECTS.words),
-            edge_linear_features=10,
-            graph_root=f"hico_20160224_det/processed/{split}",
-            image_root=f"hico_20160224_det/raw/images/{split}2015",
-            matlab_root=f"hico_20160224_det/raw/anno_bbox.mat",
+            graph_root=processed / split,
+            image_root=raw / f"images/{split}2015",
+            **metadata_common,
         )

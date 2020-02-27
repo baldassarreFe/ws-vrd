@@ -16,11 +16,13 @@ from ..common import get_exif_orientation
 def get_relationship_detection_dicts(root: Path) -> List[Dict[str, Any]]:
     samples = []
 
-    for d in scipy.io.loadmat(root.joinpath('annotations.mat').as_posix())['annotations']:
+    for d in scipy.io.loadmat(root.joinpath("annotations.mat").as_posix())[
+        "annotations"
+    ]:
         d = d.squeeze(0).item()
-        filename = d['filename'].item().item()
-        image_id = d['im_id'].item().item()
-    
+        filename = d["filename"].item().item()
+        image_id = d["im_id"].item().item()
+
         img_path = root / "images" / filename
         try:
             with Image.open(img_path.as_posix()) as img:
@@ -29,7 +31,7 @@ def get_relationship_detection_dicts(root: Path) -> List[Dict[str, Any]]:
         except (FileNotFoundError, UnidentifiedImageError):
             logger.warning(f"Image not found/invalid {img_path}")
             continue
-    
+
         if exif_orientation is not None:
             logger.warning(
                 f"Image {img_path}"
@@ -37,80 +39,88 @@ def get_relationship_detection_dicts(root: Path) -> List[Dict[str, Any]]:
                 f"check the corresponding boxes!"
             )
             continue
-    
+
         objects = {}
-        for o in d['objects'].item():
+        for o in d["objects"].item():
             o = o.squeeze(0).item()
-            class_str = o['category'].item().item()
-            class_id = OBJECTS.get_id(class_str.replace(' ', '_'))
+            class_str = o["category"].item().item()
+            class_id = OBJECTS.get_id(class_str.replace(" ", "_"))
             # xmin,ymin,xmax,ymax
-            box = tuple(o['box'].squeeze(0).item().squeeze(0))
-    
+            box = tuple(o["box"].squeeze(0).item().squeeze(0))
+
             objects[(class_str, box)] = {
                 "category_id": class_id,
                 "bbox": box,
                 "bbox_mode": BoxMode.XYXY_ABS,
                 "box_idx": len(objects),
             }
-    
+
         relations = []
-        for r in d['relationships'].item():
+        for r in d["relationships"].item():
             r = r.squeeze(0).item()
-            subj_class_str = r['sub'].item().item()
-            subj_box = tuple(r['sub_box'].squeeze(0).item().squeeze(0))
-            subj_idx = objects[(subj_class_str, subj_box)]['box_idx']
-    
-            obj_class_str = r['obj'].item().item()
-            obj_box = tuple(r['obj_box'].squeeze(0).item().squeeze(0))
-            obj_idx = objects[(obj_class_str, obj_box)]['box_idx']
-    
-            for c in r['rels'].item():
-                c = c.item().item().replace(' ', '_')
-                relations.append({
-                    "category_id": PREDICATES.get_id(c),
-                    "subject_idx": subj_idx,
-                    "object_idx": obj_idx,
-                })
-    
+            subj_class_str = r["sub"].item().item()
+            subj_box = tuple(r["sub_box"].squeeze(0).item().squeeze(0))
+            subj_idx = objects[(subj_class_str, subj_box)]["box_idx"]
+
+            obj_class_str = r["obj"].item().item()
+            obj_box = tuple(r["obj_box"].squeeze(0).item().squeeze(0))
+            obj_idx = objects[(obj_class_str, obj_box)]["box_idx"]
+
+            for c in r["rels"].item():
+                c = c.item().item().replace(" ", "_")
+                relations.append(
+                    {
+                        "category_id": PREDICATES.get_id(c),
+                        "subject_idx": subj_idx,
+                        "object_idx": obj_idx,
+                    }
+                )
+
         if len(relations) == 0:
-            logger.warning(
-                f"Image {img_path}" f"has 0 annotated relations!"
-            )
-    
-        samples.append({
-            'file_name': filename,
-            'image_id': image_id,
-            'width': width,
-            'height': height,
-            'annotations': sorted(objects.values(), key=itemgetter('box_idx')),
-            'relations': relations
-        })
-        
+            logger.warning(f"Image {filename}" f"has 0 annotated relations!")
+
+        samples.append(
+            {
+                "file_name": img_path.as_posix(),
+                "image_id": image_id,
+                "width": width,
+                "height": height,
+                "annotations": sorted(objects.values(), key=itemgetter("box_idx")),
+                "relations": relations,
+            }
+        )
+
     return samples
 
 
 def register_unrel(data_root: Union[str, Path]):
     data_root = Path(data_root).expanduser().resolve()
-    raw = Path(data_root).expanduser().resolve() / "unrel" / "raw"
+    raw = data_root / "unrel" / "raw"
+    processed = data_root / "unrel" / "processed"
 
-    DatasetCatalog.register(
-        f"unrel_object_detection_test",
-        partial(get_relationship_detection_dicts, raw),
-    )
-    DatasetCatalog.register(
-        f"unrel_relationship_detection_test",
-        partial(get_relationship_detection_dicts, raw),
-    )
-    MetadataCatalog.get(f"unrel_object_detection_test").set(
-        thing_classes=OBJECTS.words,
-        image_root=f"unrel/raw/images",
-        evaluator_type="coco",
-    )
-    MetadataCatalog.get(f"unrel_relationship_detection_test").set(
+    metadata_common = dict(
         thing_classes=OBJECTS.words,
         predicate_classes=PREDICATES.words,
         object_linear_features=3 + len(OBJECTS.words),
         edge_linear_features=10,
-        graph_root=f"unrel/processed",
-        image_root=f"unrel/raw/images",
+        raw=raw,
+        processed=processed,
+    )
+
+    MetadataCatalog.get("unrel_relationship_detection").set(
+        splits=("test",), **metadata_common
+    )
+
+    DatasetCatalog.register(
+        "unrel_object_detection_test", partial(get_relationship_detection_dicts, raw)
+    )
+    DatasetCatalog.register(
+        "unrel_relationship_detection_test",
+        partial(get_relationship_detection_dicts, raw),
+    )
+    MetadataCatalog.get("unrel_object_detection_test").set(
+        thing_classes=OBJECTS.words, image_root=raw / "images", evaluator_type="coco"
+    )
+    MetadataCatalog.get("unrel_relationship_detection_test").set(
+        image_root=raw / "images", graph_root=processed / "test", **metadata_common
     )

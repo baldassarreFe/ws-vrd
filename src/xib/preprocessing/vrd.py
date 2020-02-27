@@ -3,14 +3,15 @@ import time
 from pathlib import Path
 
 import torch
-from detectron2.data import DatasetCatalog
+from detectron2.data import DatasetCatalog, MetadataCatalog
 from loguru import logger
 
-from ..datasets.vrd import register_vrd, data_dict_to_vr_sample
-from ..detectron2 import DetectronWrapper, boxes_to_edge_features
-from ..logging import setup_logging, add_logfile
-from ..structures import VisualRelations
-from ..utils import SigIntCatcher
+from xib.datasets import register_unrel, register_vrd, register_datasets
+from xib.datasets.common import data_dict_to_vr_sample
+from xib.detectron2 import DetectronWrapper, boxes_to_edge_features
+from xib.logging import setup_logging, add_logfile
+from xib.structures import VisualRelations
+from xib.utils import SigIntCatcher
 
 
 def parse_args():
@@ -26,16 +27,18 @@ def parse_args():
         help="Where the pretrained detectron model is",
     )
     parser.add_argument(
-        "--dataset", required=True, choices=["vrd"], help="Which dataset to use"
-    )
-    parser.add_argument(
-        "--data-dir", required=True, type=resolve_path, help="Where the VRD dataset is"
-    )
-    parser.add_argument(
-        "--output-dir",
+        "--dataset",
         required=True,
-        type=resolve_path,
-        help="Where the processed samples will be save to",
+        choices=["vrd", "unrel"],
+        help="Which dataset to use",
+    )
+    parser.add_argument(
+        "--data-dir", required=True, type=resolve_path, help="Where the dataset is"
+    )
+    parser.add_argument(
+        "--pyramid",
+        action="store_true",
+        help="Save the feature pyramid extracted by detectron",
     )
     parser.add_argument(
         "--skip-existing",
@@ -60,15 +63,10 @@ def main():
     # Check files and folders
     if not args.data_dir.is_dir():
         raise ValueError(f"Not a directory: {args.data_dir}")
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    add_logfile(args.output_dir / f"preprocessing_{int(time.time())}.log")
 
-    if args.dataset == "vrd":
-        register_vrd(args.data_dir)
-    else:
-        raise NotImplementedError(
-            "Only VRD supported for now, use xib.preprocessing.hico_det for HICO"
-        )
+    register_datasets(args.data_dir)
+    metadata = MetadataCatalog.get(f"{args.dataset}_relationship_detection")
+    add_logfile(metadata.processed / f"preprocessing_{int(time.time())}.log")
 
     # Build detectron model
     #
@@ -89,19 +87,24 @@ def main():
     # the json annotation file, then process the image with detectron
     # to extract visual features of the boxes.
     should_stop = SigIntCatcher()
-    for split in ["train", "test"]:
+    for split in metadata.splits:
         if should_stop:
             break
+
+        output_dir = MetadataCatalog.get(
+            f"{args.dataset}_relationship_detection_{split}"
+        ).graph_root
+        output_dir.mkdir(parents=True, exist_ok=True)
+
         img_count = 0
         gt_vr_count = 0
         gt_det_count = 0
         d2_det_count = 0
         skipped_images = 0
 
-        output_dir = args.output_dir / split
-        output_dir.mkdir(exist_ok=True)
-
-        for data_dict in DatasetCatalog.get(f"vrd_relationship_detection_{split}"):
+        for data_dict in DatasetCatalog.get(
+            f"{args.dataset}_relationship_detection_{split}"
+        ):
             if should_stop:
                 break
 
@@ -115,7 +118,7 @@ def main():
                 and out_path_fp.is_file()
             ):
                 logger.debug(
-                    f"Skipping {split} image with existing .pth file: {filename}"
+                    f"Skipping {split} image with existing .pth files: {filename}"
                 )
                 continue
 
@@ -168,7 +171,8 @@ def main():
             # d2_feature_pyramid is quite big (50-70 MB) and not always needed,
             # so we save it in a separate file
             torch.save(sample, out_path_graph)
-            torch.save(d2_feature_pyramid, out_path_fp)
+            if args.pyramid:
+                torch.save(d2_feature_pyramid, out_path_fp)
 
         message = "\n".join(
             (

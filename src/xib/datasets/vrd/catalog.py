@@ -1,15 +1,15 @@
 import json
+from functools import partial
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, NewType, Set, Mapping, Union
+from typing import Any, Dict, List, Tuple, NewType, Set, Union
 
-import torch
 from PIL import Image, UnidentifiedImageError
-from detectron2.structures import BoxMode, Boxes, Instances
+from detectron2.data import DatasetCatalog, MetadataCatalog
+from detectron2.structures import BoxMode
 from loguru import logger
 
-from xib.structures import ImageSize, VisualRelations
+from .metadata import OBJECTS, PREDICATES
 from ..common import img_size_with_exif, get_exif_orientation
-from ..sample import VrSample
 
 Box = NewType("Box", Tuple[float, float, float, float])
 
@@ -92,9 +92,13 @@ def get_relationship_detection_dicts(root: Path, split: str) -> List[Dict[str, A
             )
             continue
 
+        # There are images for which the json file contains an empty list of relations.
+        # Since boxes are implicitly given from that field, this results in an
+        # image with 0 boxes and 0 relations. We still parse it here, but it should
+        # be discarded later.
         if len(relations) == 0:
             logger.warning(
-                f"{split.capitalize()} image {img_path}" f"has 0 annotated relations!"
+                f"{split.capitalize()} image {filename}" f"has 0 annotated relations!"
             )
 
         sample = {
@@ -147,58 +151,27 @@ def get_relationship_detection_dicts(root: Path, split: str) -> List[Dict[str, A
     return samples
 
 
-def data_dict_to_vr_sample(data_dict: Mapping) -> VrSample:
-    sample = VrSample(
-        filename=Path(data_dict["file_name"]).name,
-        img_size=ImageSize(data_dict["height"], data_dict["width"]),
-    )
-
-    # There are images for which the json file contains an empty list of relations.
-    # Since boxes are implicitly given from that field, this results in an
-    # image with 0 boxes and 0 relations. We still parse it here, but it should
-    # be discarded later.
-    boxes = []
-    classes = []
-    if len(data_dict["annotations"]) > 0:
-        boxes, classes = zip(
-            *((a["bbox"], a["category_id"]) for a in data_dict["annotations"])
-        )
-    boxes = Boxes(torch.tensor(boxes, dtype=torch.float))
-    classes = torch.tensor(classes, dtype=torch.long)
-    sample.gt_instances = Instances(sample.img_size, boxes=boxes, classes=classes)
-
-    relation_indexes = []
-    predicate_classes = []
-    if len(data_dict["relations"]) > 0:
-        relation_indexes, predicate_classes = zip(
-            *(
-                ((r["subject_idx"], r["object_idx"]), r["category_id"])
-                for r in data_dict["relations"]
-            )
-        )
-
-    relation_indexes = (
-        torch.tensor(relation_indexes, dtype=torch.long).view(-1, 2).transpose(0, 1)
-    )
-    predicate_classes = torch.tensor(predicate_classes, dtype=torch.long)
-
-    sample.gt_visual_relations = VisualRelations(
-        relation_indexes=relation_indexes,
-        predicate_classes=predicate_classes,
-        instances=sample.gt_instances,
-    )
-    return sample
-
-
 def register_vrd(data_root: Union[str, Path]):
-    from xib.datasets.vrd.metadata import OBJECTS, PREDICATES
-    from functools import partial
-    from detectron2.data import DatasetCatalog, MetadataCatalog
-
     data_root = Path(data_root).expanduser().resolve()
-    raw = Path(data_root).expanduser().resolve() / "vrd" / "raw"
+    raw = data_root / "vrd" / "raw"
+    processed = data_root / "vrd" / "processed"
 
-    for split in ["train", "test"]:
+    metadata_common = dict(
+        thing_classes=OBJECTS.words,
+        predicate_classes=PREDICATES.words,
+        object_linear_features=3 + len(OBJECTS.words),
+        edge_linear_features=10,
+        raw=raw,
+        processed=processed,
+        prob_s_o_given_p=processed / "prob_s_o_given_p.pkl.xz",
+        prob_s_p_o=processed / "prob_s_p_o.pkl.xz",
+    )
+
+    MetadataCatalog.get(f"vrd_relationship_detection").set(
+        splits=("train", "test"), **metadata_common
+    )
+
+    for split in metadata_common["splits"]:
         DatasetCatalog.register(
             f"vrd_object_detection_{split}",
             partial(get_object_detection_dicts, raw, split),
@@ -209,14 +182,11 @@ def register_vrd(data_root: Union[str, Path]):
         )
         MetadataCatalog.get(f"vrd_object_detection_{split}").set(
             thing_classes=OBJECTS.words,
-            image_root=f"vrd/raw/sg_{split}_images",
+            image_root=raw / f"sg_{split}_images",
             evaluator_type="coco",
         )
         MetadataCatalog.get(f"vrd_relationship_detection_{split}").set(
-            thing_classes=OBJECTS.words,
-            predicate_classes=PREDICATES.words,
-            object_linear_features=3 + len(OBJECTS.words),
-            edge_linear_features=10,
-            graph_root=f"vrd/processed/{split}",
-            image_root=f"vrd/raw/sg_{split}_images",
+            image_root=raw / f"sg_{split}_images",
+            graph_root=processed / split,
+            **metadata_common,
         )

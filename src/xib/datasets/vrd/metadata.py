@@ -1,4 +1,4 @@
-from ...structures import Vocabulary
+from xib.structures import Vocabulary
 
 # Both OBJECTS and PREDICATES follow the original json annotation file,
 # except that ' ' is substituted with '_'

@@ -57,7 +57,7 @@ python -m xib.preprocessing.train_detectron \
   --eval-only \
   --num-gpus=1 \
   --dataset="hico" \
-  --data-root="data/hico_20160224_det/raw" \
+  --data-root="./data" \
   OUTPUT_DIR "models/detectron_hico_eval_only"
 ```
 
@@ -67,7 +67,7 @@ python -m xib.preprocessing.hico_det \
   --skip-existing \
   --confidence-threshold=.3 \
   --nms-threshold=.7 \
-  --hico-dir="data/hico_20160224_det/raw" \
+  --hico-dir="./data" \
   --output-dir="data/hico_20160224_det/processed"
 ```
 
@@ -120,7 +120,7 @@ Fine-tune detectron and evaluate performances (see this [notebook](../notebooks/
 python -m xib.preprocessing.train_detectron \
   --num-gpus=2 \
   --dataset="vrd" \
-  --data-root="data/vrd/raw" \
+  --data-root="./data" \
   OUTPUT_DIR "models/detectron_vrd_train" \
   SOLVER.IMS_PER_BATCH 4 \
   SOLVER.MAX_ITER 12000
@@ -131,7 +131,7 @@ Preprocess graphs for training:
 python -m xib.preprocessing.vrd \
   --confidence-threshold=.3 \
   --d2-dir="models/detectron_vrd_train" \
-  --vrd-dir="data/vrd/raw" \
+  --data-dir="./data" \
   --output-dir="data/vrd/processed"
 ```
 
@@ -145,6 +145,7 @@ python -m xib.preprocessing.vrd \
   - 100 objects
 - 213 Mb (in matlab)
 
+Download
 ```bash
 cd data/unrel/raw
 
@@ -153,6 +154,15 @@ md5sum unrel-dataset.tar.gz
 # c6c2b20f3b4c6b5a85f070898fa5b5c1  unrel-dataset.tar.gz
 
 tar xvf unrel-dataset.tar.gz
+```
+
+Preprocess graphs for training:
+```bash
+python -m xib.preprocessing.vrd \
+  --confidence-threshold=.3 \
+  --d2-dir="models/detectron_vrd_train" \
+  --data-dir="./data" \
+  --output-dir="data/vrd/processed"
 ```
 
 ## COCO-a

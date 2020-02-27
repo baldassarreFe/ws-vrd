@@ -6,7 +6,7 @@ import torch
 from detectron2.data import MetadataCatalog
 from loguru import logger
 
-from xib.datasets.hico_det.catalog import register_hico
+from xib.datasets import register_datasets
 from xib.datasets.hico_det.matlab_reader import HicoDetMatlabLoader
 from xib.detectron2 import DetectronWrapper, boxes_to_edge_features
 from xib.logging import setup_logging, add_logfile
@@ -25,12 +25,6 @@ def parse_args():
     )
     parser.add_argument(
         "--data-dir", required=True, type=resolve_path, help="Where the HICO dataset is"
-    )
-    parser.add_argument(
-        "--output-dir",
-        required=True,
-        type=resolve_path,
-        help="Where the processed samples will be save to",
     )
     parser.add_argument(
         "--skip-existing",
@@ -54,7 +48,7 @@ def parse_args():
         required=True,
         type=float,
         default=0.7,
-        help="Theshold to use when applying non-maximum suppression to duplicate boxes in the ground truth",
+        help="Threshold to use when applying non-maximum suppression to duplicate boxes in the ground truth",
     )
 
     return parser.parse_args()
@@ -67,15 +61,10 @@ def main():
     # Check files and folders
     if not args.data_dir.is_dir():
         raise ValueError(f"Not a directory: {args.data_dir}")
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    add_logfile(args.output_dir / f"preprocessing_{int(time.time())}.log")
 
-    if args.dataset == "hico":
-        register_hico(args.data_dir)
-    else:
-        raise NotImplementedError(
-            "Only HICO supported for now, use xib.preprocessing.vrd for VRD"
-        )
+    register_datasets(args.data_dir)
+    metadata = MetadataCatalog.get(f"{args.dataset}_relationship_detection")
+    add_logfile(metadata.processed / f"preprocessing_{int(time.time())}.log")
 
     # Build detectron model
     #
@@ -94,22 +83,23 @@ def main():
     # Load ground truth bounding boxes and human-object relations from the matlab file,
     # then process the image with detectron to extract visual features of the boxes.
     should_stop = SigIntCatcher()
-    matlab_root = MetadataCatalog.get("hico_relationship_detection_train").matlab_root
-    loader = HicoDetMatlabLoader(args.data_dir / matlab_root)
+    matlab_root = MetadataCatalog.get("hico_relationship_detection").matlab_root
+    loader = HicoDetMatlabLoader(matlab_root)
     for split in HicoDetMatlabLoader.Split:
         if should_stop:
             break
+
+        metadata = MetadataCatalog.get(
+            f"{args.dataset}_relationship_detection_{split.name.lower()}"
+        )
+        output_dir = metadata.graph_root
+        output_dir.mkdir(parents=True, exist_ok=True)
+
         img_count = 0
         gt_vr_count = 0
         gt_det_count = 0
         d2_det_count = 0
         skipped_images = 0
-
-        metadata = MetadataCatalog.get(
-            f"hico_relationship_detection_{split.name.lower()}"
-        )
-        output_dir = args.output_dir.joinpath(split.name.lower())
-        output_dir.mkdir(exist_ok=True)
 
         for sample in loader.iter_vr_samples(split, args.nms_threshold):
             if should_stop:
@@ -120,9 +110,13 @@ def main():
                 ".graph.pth"
             )
             out_path_fp = output_dir.joinpath(sample.filename).with_suffix(".fp.pth")
-            if args.skip_existing and out_path_graph.is_file():
+            if (
+                args.skip_existing
+                and out_path_graph.is_file()
+                and out_path_fp.is_file()
+            ):
                 logger.debug(
-                    f"Skipping {split} image with existing .pth file: {sample.filename}"
+                    f"Skipping {split} image with existing .pth files: {sample.filename}"
                 )
                 continue
 
@@ -138,7 +132,7 @@ def main():
                 continue
 
             # Run detectron on the image, extracting features from both the detected and ground-truth objects
-            image_path = args.data_dir / metadata.image_root / sample.filename
+            image_path = metadata.image_root / sample.filename
             d2_feature_pyramid, sample.d2_instances, sample.gt_instances = detectron(
                 image_path, sample.gt_instances
             )
