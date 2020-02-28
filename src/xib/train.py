@@ -440,7 +440,9 @@ def main():
     # endregion
 
     # region Visual Relations engines
-    vr_model = VisualRelationExplainer(model, **conf.visual_relations)
+    vr_model = VisualRelationExplainer(
+        model, dataset_metadata["train_gt"], **conf.visual_relations
+    )
 
     vr_predicate_validator = Validator(vr_validation_step, conf)
     vr_predicate_validator.model = vr_model
@@ -530,7 +532,6 @@ def main():
         Events.EPOCH_COMPLETED,
         PredicatePredictionLogger(
             grid=(2, 3),
-            data_root=conf.dataset.folder,
             tag="train_gt",
             logger=tb_img_logger.writer,
             metadata=dataset_metadata["train_gt"],
@@ -562,7 +563,9 @@ def main():
     # endregion
 
     # region Predicate classification validation callbacks
-    ProgressBar(persist=True, desc="[val] Predicate classification").attach(pred_class_validator)
+    ProgressBar(persist=True, desc="[val] Predicate classification").attach(
+        pred_class_validator
+    )
 
     if conf.losses["bce"]["weight"] > 0:
         Average(output_transform=lambda o: o["losses"]["loss/bce"]).attach(
@@ -600,7 +603,6 @@ def main():
         Events.EPOCH_COMPLETED,
         PredicatePredictionLogger(
             grid=(2, 3),
-            data_root=conf.dataset.folder,
             tag="val_gt",
             logger=tb_img_logger.writer,
             metadata=dataset_metadata["val_gt"],
@@ -647,7 +649,9 @@ def main():
             vr_predicate_validator, f"vr/predicate/recall_at_{step}"
         )
 
-    ProgressBar(persist=True, desc="[val] Predicate detection").attach(vr_predicate_validator)
+    ProgressBar(persist=True, desc="[val] Predicate detection").attach(
+        vr_predicate_validator
+    )
 
     vr_predicate_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
@@ -690,8 +694,12 @@ def main():
                 vr_phrase_and_relation_validator, f"vr/{name}/recall_at_{step}"
             )
     if conf.dataset.name == "hico":
-        HoiClassificationMeanAvgPrecision().attach(vr_phrase_and_relation_validator, "pc/hoi/mAP")
-        HoiDetectionMeanAvgPrecision().attach(vr_phrase_and_relation_validator, "vr/hoi/mAP")
+        HoiClassificationMeanAvgPrecision().attach(
+            vr_phrase_and_relation_validator, "pc/hoi/mAP"
+        )
+        HoiDetectionMeanAvgPrecision().attach(
+            vr_phrase_and_relation_validator, "vr/hoi/mAP"
+        )
 
     vr_phrase_and_relation_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
@@ -740,7 +748,9 @@ def main():
             pred_class_tester, "pc/recall_at"
         )
 
-        ProgressBar(persist=True, desc="[test] Predicate classification").attach(pred_class_tester)
+        ProgressBar(persist=True, desc="[test] Predicate classification").attach(
+            pred_class_tester
+        )
 
         pred_class_tester.add_event_handler(
             Events.EPOCH_COMPLETED,
@@ -755,7 +765,6 @@ def main():
             Events.EPOCH_COMPLETED,
             PredicatePredictionLogger(
                 grid=(2, 3),
-                data_root=conf.dataset.folder,
                 tag="test_gt",
                 logger=tb_img_logger.writer,
                 metadata=dataset_metadata["test_gt"],
@@ -774,7 +783,9 @@ def main():
                 output_transform=itemgetter(f"vr/predicate/recall_at_{step}")
             ).attach(vr_predicate_tester, f"vr/predicate/recall_at_{step}")
 
-        ProgressBar(persist=True, desc="[test] Predicate detection").attach(vr_predicate_tester)
+        ProgressBar(persist=True, desc="[test] Predicate detection").attach(
+            vr_predicate_tester
+        )
 
         vr_predicate_tester.add_event_handler(
             Events.EPOCH_COMPLETED,
@@ -817,8 +828,12 @@ def main():
                     output_transform=itemgetter(f"vr/{name}/recall_at_{step}")
                 ).attach(vr_phrase_and_relation_tester, f"vr/{name}/recall_at_{step}")
         if conf.dataset.name == "hico":
-            HoiClassificationMeanAvgPrecision().attach(vr_phrase_and_relation_tester, "pc/hoi/mAP")
-            HoiDetectionMeanAvgPrecision().attach(vr_phrase_and_relation_tester, "vr/hoi/mAP")
+            HoiClassificationMeanAvgPrecision().attach(
+                vr_phrase_and_relation_tester, "pc/hoi/mAP"
+            )
+            HoiDetectionMeanAvgPrecision().attach(
+                vr_phrase_and_relation_tester, "vr/hoi/mAP"
+            )
 
         vr_phrase_and_relation_tester.add_event_handler(
             Events.EPOCH_COMPLETED,

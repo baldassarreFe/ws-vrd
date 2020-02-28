@@ -173,8 +173,7 @@ def build_datasets(conf) -> Tuple[Mapping[str, PcDataset], Mapping[str, Metadata
     if "trainval" in conf:
         metadata["train"] = metadata["val"] = MetadataCatalog.get(conf.trainval.name)
         data_dicts = DatasetCatalog.get(conf.trainval.name)
-        # TODO just for debugging, remove when training!
-        data_dicts = data_dicts[:2000]
+        data_dicts = data_dicts
         datasets["train"], datasets["val"] = torch.utils.data.random_split(
             PcDataset(data_dicts, metadata["train"], [RandomResizedCrop(224)]),
             [
@@ -415,7 +414,6 @@ def main():
         Events.EPOCH_COMPLETED,
         PredicatePredictionLogger(
             grid=(2, 3),
-            data_root=conf.dataset.folder,
             tag="train",
             logger=tb_img_logger.writer,
             metadata=dataset_metadata["train"],
@@ -476,7 +474,6 @@ def main():
         Events.EPOCH_COMPLETED,
         PredicatePredictionLogger(
             grid=(2, 3),
-            data_root=conf.dataset.folder,
             tag="val",
             logger=tb_img_logger.writer,
             metadata=dataset_metadata["val"],
@@ -552,7 +549,6 @@ def main():
             Events.EPOCH_COMPLETED,
             PredicatePredictionLogger(
                 grid=(2, 3),
-                data_root=conf.dataset.folder,
                 tag="test",
                 logger=tb_img_logger.writer,
                 metadata=dataset_metadata["test"],

@@ -1,6 +1,9 @@
 from typing import Dict
 
+import numpy as np
+import pandas as pd
 import torch
+from detectron2.data.catalog import Metadata
 from torch_geometric.data import Batch
 
 from ..utils import scatter_topk_2d_flat
@@ -17,12 +20,14 @@ class VisualRelationExplainer(torch.nn.Module):
     def __init__(
         self,
         model: torch.nn.Module,
+        metadata: Metadata,
         top_k_predicates: int = 10,
         top_x_relations: int = 100,
         activations: bool = True,
         channel_mean: bool = True,
-        relevance_fn: str = "relu_sum",
+        relevance_fn: str = "sum_positives",
         object_scores: bool = True,
+        frequencies: str = "uniform",
     ):
         """
 
@@ -34,12 +39,15 @@ class VisualRelationExplainer(torch.nn.Module):
             activations: whether to use gradients only or (activations * gradients)
             channel_mean: if using activations, whether to aggregate 2D gradients along H and W
                           before multiplying with their tensor
-            relevance_fn: aggregate node/edge relevance using [relu_sum, l1, l2]
+            relevance_fn: aggregate node/edge relevance using [sum_positives, l1, l2]
             object_scores: use subject/object scores when ranking relations
+            frequencies: whether to use triplet frequencies when scoring relationships
+                         available choices ['uniform', 's,o|p', 's,p,o']
         """
         super().__init__()
 
         self.model = model
+        self.metadata = metadata
         self.top_k_predicates = top_k_predicates
         self.top_x_relations = top_x_relations
 
@@ -52,6 +60,16 @@ class VisualRelationExplainer(torch.nn.Module):
         self.relevance_fn = relevance_fn
 
         self.object_scores = object_scores
+        self.frequencies = frequencies
+
+        if frequencies == "uniform":
+            self.frequencies = None
+        elif frequencies == "s,o|p":
+            self.frequencies = pd.read_pickle(metadata.prob_s_o_given_p)
+        elif frequencies == "s,p,o":
+            self.frequencies = pd.read_pickle(metadata.prob_s_p_o)
+        else:
+            raise ValueError(f"Invalid parameter `frequencies`: {frequencies}")
 
     @staticmethod
     def _zero_grad_(tensor: torch.Tensor):
@@ -109,7 +127,7 @@ class VisualRelationExplainer(torch.nn.Module):
                 # Propagate gradient of prediction to outputs, use L1 norm of the gradient as relevance
                 inputs.apply(
                     VisualRelationExplainer._zero_grad_,
-                    *VisualRelationExplainer.GRAD_WRT
+                    *VisualRelationExplainer.GRAD_WRT,
                 )
                 k_th_predicate_score.backward(
                     torch.ones_like(k_th_predicate_score), retain_graph=still_needed
@@ -142,12 +160,20 @@ class VisualRelationExplainer(torch.nn.Module):
         # - the score of the predicate that was used to compute those relevances
         # - optionally, the confidence score given to the subject from the object detector
         # - optionally, the confidence score given to the object from the object detector
+        # - optionally, the relationship prior computed on a small validation set
+
         # [E x TOP_K_PREDICATES]
         relation_scores = (
             relevance_nodes[inputs.relation_indexes[0]]
             * relevance_edges
             * relevance_nodes[inputs.relation_indexes[1]]
-            * predicate_scores_sorted.detach()[edge_to_graph_assignment]
+        )
+
+        # TODO normalize relation scores so that
+        #      sum_{box_i, box_j} P(box_subj=box_i, box_obj=box_i | graph, k) = 1
+
+        relation_scores = (
+            relation_scores * predicate_scores_sorted[edge_to_graph_assignment]
         )
 
         if self.object_scores:
@@ -155,6 +181,21 @@ class VisualRelationExplainer(torch.nn.Module):
                 relation_scores
                 * inputs.object_scores[inputs.relation_indexes[0], None]
                 * inputs.object_scores[inputs.relation_indexes[1], None]
+            )
+
+        if self.frequencies is not None:
+            frequencies = np.empty(tuple(relation_scores.shape))
+
+            s = inputs.object_classes[inputs.relation_indexes[0]].tolist()
+            o = inputs.object_classes[inputs.relation_indexes[1]].tolist()
+            for k, p in enumerate(
+                predicate_classes_sorted[edge_to_graph_assignment].unbind(dim=1)
+            ):
+                spo = list(zip(s, p.tolist(), o))
+                frequencies[:, k] = self.frequencies[spo].values
+
+            relation_scores = relation_scores * torch.from_numpy(frequencies).to(
+                relation_scores.device
             )
 
         relations = self._keep_top_x_relations(
@@ -245,7 +286,7 @@ class VisualRelationExplainer(torch.nn.Module):
                     "object_classes",
                     "object_image_size",
                 )
-            }
+            },
         )
         return relations
 
@@ -275,9 +316,11 @@ def _relevance_2d(x: torch.Tensor, activations: bool, cam: bool):
 
 def _relevance_fn(relevance, pool: str):
     relevance = relevance.flatten(start_dim=1)
-    if pool == "relu_sum":
+    if pool == "sum_positives":
         return relevance.relu().sum(dim=1)
     elif pool == "l1":
         return relevance.abs().sum(dim=1)
     elif pool == "l2":
         return relevance.pow(2).sum(dim=1)
+    else:
+        raise ValueError(f"Invalid relevance fn mode: {pool}")

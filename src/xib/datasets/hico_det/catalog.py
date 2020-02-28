@@ -157,7 +157,7 @@ def register_hico(data_root: Union[str, Path]):
         splits=("train", "test"), **metadata_common
     )
 
-    for split in metadata_common["splits"]:
+    for split in MetadataCatalog.get(f"hico_relationship_detection").splits:
         DatasetCatalog.register(
             f"hico_object_detection_{split}",
             partial(get_object_detection_dicts, raw, split),

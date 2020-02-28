@@ -9,7 +9,7 @@ dataset:
   folder: ./data
   graph_type: human-object # fully_connected
   trainval:
-    split: .75
+    split: .85
     name: ${dataset.name}_relationship_detection_train
 
 dataloader:

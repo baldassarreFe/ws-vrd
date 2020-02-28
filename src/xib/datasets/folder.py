@@ -3,6 +3,7 @@ from typing import Sequence, Union, Optional
 
 import numpy as np
 import torch
+import natsort
 from loguru import logger
 from tqdm import tqdm
 
@@ -49,7 +50,9 @@ class DatasetFolder(object):
     @classmethod
     def from_folder(cls, folder: Union[str, Path], *, suffix: str):
         folder = Path(folder).expanduser().resolve()
-        paths = sorted(p for p in folder.iterdir() if p.name.endswith(suffix))
+        paths = natsort.natsorted(
+            (p for p in folder.iterdir() if p.name.endswith(suffix)), alg=natsort.PATH
+        )
         if len(paths) == 0:
             logger.warning(f"Empty folder: no {suffix} file found in {folder}")
         return cls(paths)
