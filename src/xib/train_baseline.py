@@ -25,19 +25,21 @@ from torch.optim.optimizer import Optimizer
 from torch.utils.data import Dataset, DataLoader
 from torchvision.transforms import RandomResizedCrop, Resize, CenterCrop
 
-from xib.datasets import PcDataset
 from .config import parse_args
-from .datasets import register_datasets
-from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch
-from .ignite import OptimizerParamsHandler, EpochHandler
-from .ignite import PredicatePredictionLogger
-from .ignite import RecallAtBatch, RecallAtEpoch
-from .ignite import Trainer, Validator
+from .datasets import register_datasets, PcDataset
+from .ignite import Trainer, Validator, OptimizerParamsHandler, EpochHandler
 from .logging import setup_logging, add_logfile, add_custom_scalars
 from .logging.hyperparameters import (
     add_hparam_summary,
     add_session_start,
     add_session_end,
+)
+from .metrics.pred_class import (
+    RecallAtBatch,
+    RecallAtEpoch,
+    PredicateClassificationLogger,
+    PredicateClassificationMeanAveragePrecisionBatch,
+    PredicateClassificationMeanAveragePrecisionEpoch,
 )
 from .utils import import_
 
@@ -381,7 +383,7 @@ def main():
     )
 
     pred_class_trainer.add_event_handler(
-        Events.ITERATION_COMPLETED, MeanAveragePrecisionBatch()
+        Events.ITERATION_COMPLETED, PredicateClassificationMeanAveragePrecisionBatch()
     )
     pred_class_trainer.add_event_handler(
         Events.ITERATION_COMPLETED, RecallAtBatch(sizes=(5, 10))
@@ -412,7 +414,7 @@ def main():
     )
     pred_class_trainer.add_event_handler(
         Events.EPOCH_COMPLETED,
-        PredicatePredictionLogger(
+        PredicateClassificationLogger(
             grid=(2, 3),
             tag="train",
             logger=tb_img_logger.writer,
@@ -450,9 +452,9 @@ def main():
         pred_class_validator, "loss/total"
     )
 
-    MeanAveragePrecisionEpoch(itemgetter("target", "output")).attach(
-        pred_class_validator, "pc/mAP"
-    )
+    PredicateClassificationMeanAveragePrecisionEpoch(
+        itemgetter("target", "output")
+    ).attach(pred_class_validator, "pc/mAP")
     RecallAtEpoch((5, 10), itemgetter("target", "output")).attach(
         pred_class_validator, "pc/recall_at"
     )
@@ -472,7 +474,7 @@ def main():
     )
     pred_class_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
-        PredicatePredictionLogger(
+        PredicateClassificationLogger(
             grid=(2, 3),
             tag="val",
             logger=tb_img_logger.writer,
@@ -527,9 +529,9 @@ def main():
             device=conf.session.device,
         ).attach(pred_class_tester, "loss/total")
 
-        MeanAveragePrecisionEpoch(itemgetter("target", "output")).attach(
-            pred_class_tester, "pc/mAP"
-        )
+        PredicateClassificationMeanAveragePrecisionEpoch(
+            itemgetter("target", "output")
+        ).attach(pred_class_tester, "pc/mAP")
         RecallAtEpoch((5, 10), itemgetter("target", "output")).attach(
             pred_class_tester, "pc/recall_at"
         )
@@ -547,7 +549,7 @@ def main():
         )
         pred_class_tester.add_event_handler(
             Events.EPOCH_COMPLETED,
-            PredicatePredictionLogger(
+            PredicateClassificationLogger(
                 grid=(2, 3),
                 tag="test",
                 logger=tb_img_logger.writer,

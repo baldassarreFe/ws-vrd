@@ -117,18 +117,14 @@ def get_relationship_detection_dicts(root: Path, split: str) -> List[Dict[str, A
             ],
             "relations": [
                 {
-                    "subject_idx": subject_class.item(),
+                    "subject_idx": subject_idx.item(),
                     "category_id": predicate_class.item(),
-                    "object_idx": object_class.item(),
+                    "object_idx": object_idx.item(),
                 }
-                for subject_class, predicate_class, object_class in zip(
-                    hds.gt_instances.classes[
-                        hds.gt_visual_relations.relation_indexes[0]
-                    ],
+                for subject_idx, predicate_class, object_idx in zip(
+                    hds.gt_visual_relations.relation_indexes[0],
                     hds.gt_visual_relations.predicate_classes,
-                    hds.gt_instances.classes[
-                        hds.gt_visual_relations.relation_indexes[1]
-                    ],
+                    hds.gt_visual_relations.relation_indexes[1],
                 )
             ],
         }

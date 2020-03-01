@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Optional, Union, Iterator, Tuple, Sequence, Mapping, Any
+from typing import Optional, Union, Iterator, Tuple, Sequence, Mapping, Any, List
 
 import torch
 from detectron2.structures import Boxes, Instances
+from torch_geometric.data import Batch, Data
 
 from .boxes import matched_boxlist_union
 from .instances import instance_str
@@ -217,3 +218,18 @@ class VisualRelations(object):
             for k, v in self.__dict__.items()
             if k not in {"object_vocabulary", "predicate_vocabulary"}
         }
+
+
+def split_vr_batch(relations: Batch) -> List[Data]:
+    # Hack to force torch_geometric to accept our graphs
+    relations.x = relations.object_boxes
+    relations.__slices__["x"] = relations.__slices__["object_boxes"]
+    result = []
+    for r in relations.to_data_list():
+        r.x = None
+        r.n_nodes = r.n_nodes.item()
+        r.n_edges = r.n_edges.item()
+        result.append(r)
+    relations.x = None
+    del relations.__slices__["x"]
+    return result

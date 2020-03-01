@@ -1,6 +1,4 @@
-from detectron2.utils.registry import Registry
-
 from .relational_network import RelationalNetwork
+from .visual_relations_explainer import VisualRelationExplainer
 
-ARCH_REGISTRY = Registry("ARCH")
-ARCH_REGISTRY.register(RelationalNetwork)
+__all__ = ["RelationalNetwork", "VisualRelationExplainer"]

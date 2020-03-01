@@ -1,7 +1,7 @@
 visual_relations:
   top_k_predicates: 10
   top_x_relations: 100
-  activations: yes
+  activations: no
   channel_mean: no
   relevance_fn: l1 # l1 l2 sum_positives
   object_scores: yes

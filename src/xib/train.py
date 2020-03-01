@@ -26,21 +26,29 @@ from torch.optim.optimizer import Optimizer
 from torch.utils.data import Dataset, DataLoader
 from torch_geometric.data import Batch
 
-from xib.ignite import HoiDetectionMeanAvgPrecision
+from xib.metrics.relation_det import VisualRelationPredictionExporter
 from .config import parse_args
 from .datasets import DatasetFolder, VrDataset, register_datasets
-from .ignite import HoiClassificationMeanAvgPrecision
-from .ignite import MeanAveragePrecisionEpoch, MeanAveragePrecisionBatch
-from .ignite import MetricsHandler, OptimizerParamsHandler, EpochHandler
-from .ignite import PredicatePredictionLogger
-from .ignite import RecallAtBatch, RecallAtEpoch
-from .ignite import Trainer, Validator
-from .ignite import VisualRelationPredictionLogger, VisualRelationRecallAt
+from .ignite import Trainer, Validator, OptimizerParamsHandler, EpochHandler
 from .logging import setup_logging, add_logfile, add_custom_scalars
 from .logging.hyperparameters import (
     add_hparam_summary,
     add_session_start,
     add_session_end,
+)
+from .metrics.pred_class import (
+    RecallAtBatch,
+    RecallAtEpoch,
+    PredicateClassificationLogger,
+    PredicateClassificationMeanAveragePrecisionBatch,
+    PredicateClassificationMeanAveragePrecisionEpoch,
+)
+from .metrics.relation_det import (
+    HoiDetectionMeanAvgPrecision,
+    VisualRelationPredictionLogger,
+    HoiClassificationMeanAvgPrecision,
+    UnRelDetectionMeanAvgPrecision,
+    VisualRelationRecallAt,
 )
 from .models.visual_relations_explainer import VisualRelationExplainer
 from .utils import import_
@@ -127,7 +135,11 @@ def vr_validation_step(validator: Validator, batch: Batch):
 
     relations = validator.model(inputs)
 
-    return {"relations": relations.to("cpu"), "targets": targets}
+    return {
+        "relations": relations.to("cpu"),
+        "targets": targets,
+        "filenames": filenames,
+    }
 
 
 class PredicateClassificationCriterion(object):
@@ -499,7 +511,7 @@ def main():
     )
 
     pred_class_trainer.add_event_handler(
-        Events.ITERATION_COMPLETED, MeanAveragePrecisionBatch()
+        Events.ITERATION_COMPLETED, PredicateClassificationMeanAveragePrecisionBatch()
     )
     pred_class_trainer.add_event_handler(
         Events.ITERATION_COMPLETED, RecallAtBatch(sizes=(5, 10))
@@ -530,7 +542,7 @@ def main():
     )
     pred_class_trainer.add_event_handler(
         Events.EPOCH_COMPLETED,
-        PredicatePredictionLogger(
+        PredicateClassificationLogger(
             grid=(2, 3),
             tag="train_gt",
             logger=tb_img_logger.writer,
@@ -579,9 +591,9 @@ def main():
         pred_class_validator, "loss/total"
     )
 
-    MeanAveragePrecisionEpoch(itemgetter("target", "output")).attach(
-        pred_class_validator, "pc/mAP"
-    )
+    PredicateClassificationMeanAveragePrecisionEpoch(
+        itemgetter("target", "output")
+    ).attach(pred_class_validator, "pc/mAP")
     RecallAtEpoch((5, 10), itemgetter("target", "output")).attach(
         pred_class_validator, "pc/recall_at"
     )
@@ -601,7 +613,7 @@ def main():
     )
     pred_class_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
-        PredicatePredictionLogger(
+        PredicateClassificationLogger(
             grid=(2, 3),
             tag="val_gt",
             logger=tb_img_logger.writer,
@@ -647,6 +659,11 @@ def main():
     for step in (50, 100):
         Average(output_transform=itemgetter(f"vr/predicate/recall_at_{step}")).attach(
             vr_predicate_validator, f"vr/predicate/recall_at_{step}"
+        )
+
+    if conf.dataset.name == "unrel":
+        UnRelDetectionMeanAvgPrecision("GT").attach(
+            vr_predicate_validator, "vr/unrel/mAP"
         )
 
     ProgressBar(persist=True, desc="[val] Predicate detection").attach(
@@ -700,6 +717,10 @@ def main():
         HoiDetectionMeanAvgPrecision().attach(
             vr_phrase_and_relation_validator, "vr/hoi/mAP"
         )
+    elif conf.dataset.name == "unrel":
+        UnRelDetectionMeanAvgPrecision("D2").attach(
+            vr_phrase_and_relation_validator, "vr/unrel/mAP"
+        )
 
     vr_phrase_and_relation_validator.add_event_handler(
         Events.EPOCH_COMPLETED,
@@ -741,9 +762,9 @@ def main():
             device=conf.session.device,
         ).attach(pred_class_tester, "loss/total")
 
-        MeanAveragePrecisionEpoch(itemgetter("target", "output")).attach(
-            pred_class_tester, "pc/mAP"
-        )
+        PredicateClassificationMeanAveragePrecisionEpoch(
+            itemgetter("target", "output")
+        ).attach(pred_class_tester, "pc/mAP")
         RecallAtEpoch((5, 10), itemgetter("target", "output")).attach(
             pred_class_tester, "pc/recall_at"
         )
@@ -763,7 +784,7 @@ def main():
         )
         pred_class_tester.add_event_handler(
             Events.EPOCH_COMPLETED,
-            PredicatePredictionLogger(
+            PredicateClassificationLogger(
                 grid=(2, 3),
                 tag="test_gt",
                 logger=tb_img_logger.writer,
@@ -782,6 +803,10 @@ def main():
             Average(
                 output_transform=itemgetter(f"vr/predicate/recall_at_{step}")
             ).attach(vr_predicate_tester, f"vr/predicate/recall_at_{step}")
+        if conf.dataset.name == "unrel":
+            UnRelDetectionMeanAvgPrecision("GT").attach(
+                vr_predicate_tester, "vr/unrel/mAP"
+            )
 
         ProgressBar(persist=True, desc="[test] Predicate detection").attach(
             vr_predicate_tester
@@ -806,6 +831,12 @@ def main():
                 top_x_relations=conf.visual_relations.top_x_relations,
                 metadata=dataset_metadata["test_gt"],
                 global_step_fn=pred_class_trainer.global_step,
+            ),
+        )
+        vr_predicate_tester.add_event_handler(
+            Events.ITERATION_COMPLETED,
+            VisualRelationPredictionExporter(
+                mode="GT", dest=Path(conf.checkpoint.folder)/ conf.fullname
             ),
         )
         # endregion
@@ -834,6 +865,10 @@ def main():
             HoiDetectionMeanAvgPrecision().attach(
                 vr_phrase_and_relation_tester, "vr/hoi/mAP"
             )
+        elif conf.dataset.name == "unrel":
+            UnRelDetectionMeanAvgPrecision("D2").attach(
+                vr_phrase_and_relation_tester, "vr/unrel/mAP"
+            )
 
         vr_phrase_and_relation_tester.add_event_handler(
             Events.EPOCH_COMPLETED,
@@ -854,6 +889,12 @@ def main():
                 top_x_relations=conf.visual_relations.top_x_relations,
                 metadata=dataset_metadata["test_d2"],
                 global_step_fn=pred_class_trainer.global_step,
+            ),
+        )
+        vr_phrase_and_relation_tester.add_event_handler(
+            Events.ITERATION_COMPLETED,
+            VisualRelationPredictionExporter(
+                mode="D2", dest=Path(conf.checkpoint.folder) / conf.fullname
             ),
         )
         # endregion

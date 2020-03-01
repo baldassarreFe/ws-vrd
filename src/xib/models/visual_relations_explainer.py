@@ -283,11 +283,31 @@ class VisualRelationExplainer(torch.nn.Module):
                     "n_nodes",
                     "batch",
                     "object_boxes",
+                    "object_scores",
                     "object_classes",
                     "object_image_size",
                 )
             },
         )
+
+        # Build relations batch so that it can be split back into graphs using Batch.to_data_list()
+        edge_slice = [0] + n_relations.cumsum(dim=0).tolist()
+        relations.__slices__ = {
+            # Global attributes
+            "n_nodes": inputs.__slices__["n_nodes"],
+            "n_edges": inputs.__slices__["n_edges"],
+            # Node attributes
+            "object_boxes": inputs.__slices__["object_boxes"],
+            "object_scores": inputs.__slices__["object_scores"],
+            "object_classes": inputs.__slices__["object_classes"],
+            "object_image_size": inputs.__slices__["object_image_size"],
+            # Edge attributes
+            "relation_indexes": edge_slice,
+            "relation_scores": edge_slice,
+            "predicate_classes": edge_slice,
+            "predicate_scores": edge_slice,
+        }
+
         return relations
 
 

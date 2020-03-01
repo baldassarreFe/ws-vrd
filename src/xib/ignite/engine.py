@@ -3,11 +3,9 @@ from __future__ import annotations
 from typing import Callable, Any
 
 import torch
-from torch.optim.optimizer import Optimizer
-from torch_geometric.data import Batch
-
-from omegaconf import OmegaConf
 from ignite.engine import Engine, Events
+from omegaconf import OmegaConf
+from torch.optim.optimizer import Optimizer
 
 
 class CustomEngine(Engine):
