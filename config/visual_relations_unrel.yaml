@@ -1,11 +1,11 @@
 visual_relations:
-  top_k_predicates: 10
+  top_k_predicates: 50
   top_x_relations: 500
   activations: no
   channel_mean: no
   relevance_fn: l1 # l1 l2 sum_positives
   object_scores: yes
-  frequencies: 's,o|p' # uniform 's,o|p' 's,p,o'
+  frequencies: uniform # uniform 's,o|p' 's,p,o'
 
 hparams:
   vr/topk--topk: ${visual_relations.top_k_predicates}

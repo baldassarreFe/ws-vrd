@@ -266,7 +266,8 @@ class HoiDetectionMeanAvgPrecision(Metric):
             ap_dict[hoi] = ap
 
         aps = np.array(list(ap_dict.values()))
-        rare = np.array(list(HOI.values())) < 5
+        rare = np.array(list(HOI.values())) < 10
+        assert rare.sum() == 138
 
         return {
             "all": np.nanmean(aps),

@@ -77,7 +77,7 @@ def get_relationship_detection_dicts(root: Path) -> List[Dict[str, Any]]:
                 )
 
         if len(relations) == 0:
-            logger.warning(f"Image {filename}" f"has 0 annotated relations!")
+            logger.warning(f"Image {filename} has 0 annotated relations!")
 
         samples.append(
             {
@@ -105,6 +105,8 @@ def register_unrel(data_root: Union[str, Path]):
         edge_linear_features=10,
         raw=raw,
         processed=processed,
+        prob_s_o_given_p=processed / "prob_s_o_given_p.pkl.xz",
+        prob_s_p_o=processed / "prob_s_p_o.pkl.xz",
     )
 
     MetadataCatalog.get("unrel_relationship_detection").set(
@@ -122,5 +124,30 @@ def register_unrel(data_root: Union[str, Path]):
         thing_classes=OBJECTS.words, image_root=raw / "images", evaluator_type="coco"
     )
     MetadataCatalog.get("unrel_relationship_detection_test").set(
+        image_root=raw / "images", graph_root=processed / "test", **metadata_common
+    )
+
+
+def register_unrel_vrd(data_root: Union[str, Path]):
+    data_root = Path(data_root).expanduser().resolve()
+    raw = data_root / "unrel_vrd" / "raw"
+    processed = data_root / "unrel_vrd" / "processed"
+
+    metadata_common = dict(
+        thing_classes=OBJECTS.words,
+        predicate_classes=PREDICATES.words,
+        object_linear_features=3 + len(OBJECTS.words),
+        edge_linear_features=10,
+        raw=raw,
+        processed=processed,
+        prob_s_o_given_p=processed / "prob_s_o_given_p.pkl.xz",
+        prob_s_p_o=processed / "prob_s_p_o.pkl.xz",
+    )
+
+    MetadataCatalog.get("unrel_vrd_relationship_detection").set(
+        splits=("test",), **metadata_common
+    )
+
+    MetadataCatalog.get("unrel_vrd_relationship_detection_test").set(
         image_root=raw / "images", graph_root=processed / "test", **metadata_common
     )

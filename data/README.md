@@ -165,6 +165,28 @@ python -m xib.preprocessing.vrd \
   --output-dir="data/vrd/processed"
 ```
 
+To evaluate the model on UnRel with VRD as a confounder (called `unrel_vrd` in the dataset catalog), set up these links:
+```bash
+cd data
+mkdir -p unrel_vrd/raw/images unrel_vrd/processed/test
+
+for f in unrel/raw/images/*.jpg; do
+    ln -s "$(realpath "$f")" "unrel_vrd/raw/images/$(basename "$f")"
+done
+
+for f in vrd/raw/sg_test_images/*.jpg; do
+    ln -s "$(realpath "$f")" "unrel_vrd/raw/images/$(basename "$f")"
+done
+
+for f in unrel/processed/test/*.graph.pth; do
+    ln -s "$(realpath "$f")" "unrel_vrd/processed/test/$(basename "$f")"
+done
+
+for f in vrd/processed/test/*.graph.pth; do
+    ln -s "$(realpath "$f")" "unrel_vrd/processed/test/$(basename "$f")"
+done
+```
+
 ## COCO-a
 - Subset of COCO
 - 4413 images

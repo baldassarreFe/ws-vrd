@@ -661,7 +661,7 @@ def main():
             vr_predicate_validator, f"vr/predicate/recall_at_{step}"
         )
 
-    if conf.dataset.name == "unrel":
+    if conf.dataset.name in {"unrel", "unrel_vrd"}:
         UnRelDetectionMeanAvgPrecision("GT").attach(
             vr_predicate_validator, "vr/unrel/mAP"
         )
@@ -717,7 +717,7 @@ def main():
         HoiDetectionMeanAvgPrecision().attach(
             vr_phrase_and_relation_validator, "vr/hoi/mAP"
         )
-    elif conf.dataset.name == "unrel":
+    elif conf.dataset.name in {"unrel", "unrel_vrd"}:
         UnRelDetectionMeanAvgPrecision("D2").attach(
             vr_phrase_and_relation_validator, "vr/unrel/mAP"
         )
@@ -803,7 +803,7 @@ def main():
             Average(
                 output_transform=itemgetter(f"vr/predicate/recall_at_{step}")
             ).attach(vr_predicate_tester, f"vr/predicate/recall_at_{step}")
-        if conf.dataset.name == "unrel":
+        if conf.dataset.name in {"unrel", "unrel_vrd"}:
             UnRelDetectionMeanAvgPrecision("GT").attach(
                 vr_predicate_tester, "vr/unrel/mAP"
             )
@@ -836,7 +836,7 @@ def main():
         vr_predicate_tester.add_event_handler(
             Events.ITERATION_COMPLETED,
             VisualRelationPredictionExporter(
-                mode="GT", dest=Path(conf.checkpoint.folder)/ conf.fullname
+                mode="GT", dest=Path(conf.checkpoint.folder) / conf.fullname
             ),
         )
         # endregion
@@ -865,7 +865,7 @@ def main():
             HoiDetectionMeanAvgPrecision().attach(
                 vr_phrase_and_relation_tester, "vr/hoi/mAP"
             )
-        elif conf.dataset.name == "unrel":
+        elif conf.dataset.name in {"unrel", "unrel_vrd"}:
             UnRelDetectionMeanAvgPrecision("D2").attach(
                 vr_phrase_and_relation_tester, "vr/unrel/mAP"
             )

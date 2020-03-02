@@ -98,7 +98,7 @@ def get_relationship_detection_dicts(root: Path, split: str) -> List[Dict[str, A
         # be discarded later.
         if len(relations) == 0:
             logger.warning(
-                f"{split.capitalize()} image {filename}" f"has 0 annotated relations!"
+                f"{split.capitalize()} image {filename} has 0 annotated relations!"
             )
 
         sample = {
