@@ -26,7 +26,10 @@ from torch.optim.optimizer import Optimizer
 from torch.utils.data import Dataset, DataLoader
 from torch_geometric.data import Batch
 
-from xib.metrics.relation_det import VisualRelationPredictionExporter
+from xib.metrics.relation_det import (
+    VisualRelationPredictionExporter,
+    VrdZeroShotVisualRelationRecallAt,
+)
 from .config import parse_args
 from .datasets import DatasetFolder, VrDataset, register_datasets
 from .ignite import Trainer, Validator, OptimizerParamsHandler, EpochHandler
@@ -803,6 +806,24 @@ def main():
             Average(
                 output_transform=itemgetter(f"vr/predicate/recall_at_{step}")
             ).attach(vr_predicate_tester, f"vr/predicate/recall_at_{step}")
+
+        if (
+            "test" in conf.dataset
+            and conf.dataset.test.name == "vrd_relationship_detection_zero_shot"
+        ):
+            vr_predicate_tester.add_event_handler(
+                Events.ITERATION_COMPLETED,
+                VrdZeroShotVisualRelationRecallAt(type="predicate", steps=(50, 100)),
+            )
+            for step in (50, 100):
+                Average(
+                    output_transform=itemgetter(
+                        f"vr/predicate/zero_shot/recall_at_{step}"
+                    )
+                ).attach(
+                    vr_predicate_tester, f"vr/predicate/zero_shot/recall_at_{step}"
+                )
+
         if conf.dataset.name in {"unrel", "unrel_vrd"}:
             UnRelDetectionMeanAvgPrecision("GT").attach(
                 vr_predicate_tester, "vr/unrel/mAP"
@@ -858,6 +879,7 @@ def main():
                 Average(
                     output_transform=itemgetter(f"vr/{name}/recall_at_{step}")
                 ).attach(vr_phrase_and_relation_tester, f"vr/{name}/recall_at_{step}")
+
         if conf.dataset.name == "hico":
             HoiClassificationMeanAvgPrecision().attach(
                 vr_phrase_and_relation_tester, "pc/hoi/mAP"
@@ -869,6 +891,28 @@ def main():
             UnRelDetectionMeanAvgPrecision("D2").attach(
                 vr_phrase_and_relation_tester, "vr/unrel/mAP"
             )
+        if (
+            "test" in conf.dataset
+            and conf.dataset.test.name == "vrd_relationship_detection_zero_shot"
+        ):
+            vr_phrase_and_relation_tester.add_event_handler(
+                Events.ITERATION_COMPLETED,
+                VrdZeroShotVisualRelationRecallAt(type="phrase", steps=(50, 100)),
+            )
+            vr_phrase_and_relation_tester.add_event_handler(
+                Events.ITERATION_COMPLETED,
+                VrdZeroShotVisualRelationRecallAt(type="relationship", steps=(50, 100)),
+            )
+            for name in ["phrase", "relationship"]:
+                for step in (50, 100):
+                    Average(
+                        output_transform=itemgetter(
+                            f"vr/{name}/zero_shot/recall_at_{step}"
+                        )
+                    ).attach(
+                        vr_phrase_and_relation_tester,
+                        f"vr/{name}/zero_shot/recall_at_{step}",
+                    )
 
         vr_phrase_and_relation_tester.add_event_handler(
             Events.EPOCH_COMPLETED,

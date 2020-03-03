@@ -1,7 +1,8 @@
 import json
-from functools import partial
+from collections import defaultdict
+from functools import partial, lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, NewType, Set, Union
+from typing import Any, Dict, List, Tuple, NewType, Set, Union, Iterator
 
 from PIL import Image, UnidentifiedImageError
 from detectron2.data import DatasetCatalog, MetadataCatalog
@@ -151,6 +152,76 @@ def get_relationship_detection_dicts(root: Path, split: str) -> List[Dict[str, A
     return samples
 
 
+@lru_cache(maxsize=1)
+def get_zero_shot_triplets() -> Set[Tuple[int, int, int]]:
+    """
+
+    Returns: a set of (subject_class, predicate_class, object_class) triplets
+
+    """
+    # This actually counts the occurrences of all triplets,
+    # it's useless now but it's super fast so it doesn't hurt
+    train_data_dicts = DatasetCatalog.get("vrd_relationship_detection_train")
+    train_spo = defaultdict(lambda: 0)
+    for d in train_data_dicts:
+        for r in d["relations"]:
+            spo = (
+                d["annotations"][r["subject_idx"]]["category_id"],
+                r["category_id"],
+                d["annotations"][r["object_idx"]]["category_id"],
+            )
+            train_spo[spo] += 1
+
+    test_data_dicts = DatasetCatalog.get("vrd_relationship_detection_test")
+    test_spo = defaultdict(lambda: 0)
+    for d in test_data_dicts:
+        for r in d["relations"]:
+            spo = (
+                d["annotations"][r["subject_idx"]]["category_id"],
+                r["category_id"],
+                d["annotations"][r["object_idx"]]["category_id"],
+            )
+            test_spo[spo] += 1
+
+    zero_shot = set.difference(set(test_spo.keys()), set(train_spo.keys()))
+    assert len(zero_shot) == 1025
+
+    return zero_shot
+
+
+def get_zero_shot_data_dicts() -> Iterator[Dict]:
+    def rel_to_spo(r, d):
+        return (
+            d["annotations"][r["subject_idx"]]["category_id"],
+            r["category_id"],
+            d["annotations"][r["object_idx"]]["category_id"],
+        )
+
+    # List all triplets in the training set
+    train_data_dicts = DatasetCatalog.get("vrd_relationship_detection_train")
+    train_triplets = set()
+    for d in train_data_dicts:
+        for r in d["relations"]:
+            spo = rel_to_spo(r, d)
+            train_triplets.add(spo)
+
+    # List all triplets in the test set
+    test_data_dicts = DatasetCatalog.get("vrd_relationship_detection_test")
+    test_triplets = set()
+    for d in test_data_dicts:
+        for r in d["relations"]:
+            spo = rel_to_spo(r, d)
+            test_triplets.add(spo)
+
+    # Find zero shot triplets: present in test set but not in train set
+    zero_shot_triplets = set.difference(test_triplets, train_triplets)
+
+    # Filter out test images that do not contain zero-shot triplets
+    for d in test_data_dicts:
+        if any(rel_to_spo(r, d) in zero_shot_triplets for r in d["relations"]):
+            yield d
+
+
 def register_vrd(data_root: Union[str, Path]):
     data_root = Path(data_root).expanduser().resolve()
     raw = data_root / "vrd" / "raw"
@@ -164,6 +235,7 @@ def register_vrd(data_root: Union[str, Path]):
         raw=raw,
         processed=processed,
         prob_s_o_given_p=processed / "prob_s_o_given_p.pkl.xz",
+        prob_s_o_given_p_test=processed / "prob_s_o_given_p_test.pkl.xz",
         prob_s_p_o=processed / "prob_s_p_o.pkl.xz",
     )
 
@@ -190,3 +262,31 @@ def register_vrd(data_root: Union[str, Path]):
             graph_root=processed / split,
             **metadata_common,
         )
+
+
+def register_vrd_zero_shot(data_root: Union[str, Path]):
+    data_root = Path(data_root).expanduser().resolve()
+    raw = data_root / "vrd_zero_shot" / "raw"
+    processed = data_root / "vrd_zero_shot" / "processed"
+
+    metadata_common = dict(
+        thing_classes=OBJECTS.words,
+        predicate_classes=PREDICATES.words,
+        object_linear_features=3 + len(OBJECTS.words),
+        edge_linear_features=10,
+        raw=raw,
+        processed=processed,
+        prob_s_o_given_p=processed / "prob_s_o_given_p.pkl.xz",
+        prob_s_o_given_p_test=processed / "prob_s_o_given_p_test.pkl.xz",
+        prob_s_p_o=processed / "prob_s_p_o.pkl.xz",
+    )
+
+    DatasetCatalog.register(
+        "vrd_relationship_detection_zero_shot", get_zero_shot_data_dicts
+    )
+    MetadataCatalog.get("vrd_relationship_detection_zero_shot").set(
+        splits=("test",),
+        image_root=raw / "sg_test_images",
+        graph_root=processed / "test",
+        **metadata_common,
+    )

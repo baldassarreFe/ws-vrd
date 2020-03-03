@@ -4,7 +4,7 @@ from .text_logger import (
     VisualRelationPredictionLogger,
     VisualRelationPredictionExporter,
 )
-from .recall_at import VisualRelationRecallAt
+from .recall_at import VisualRelationRecallAt, VrdZeroShotVisualRelationRecallAt
 
 __all__ = [
     "HoiDetectionMeanAvgPrecision",
@@ -13,4 +13,5 @@ __all__ = [
     "VisualRelationPredictionLogger",
     "VisualRelationPredictionExporter",
     "VisualRelationRecallAt",
+    "VrdZeroShotVisualRelationRecallAt",
 ]

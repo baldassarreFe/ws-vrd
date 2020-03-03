@@ -4,6 +4,7 @@ import torch
 from ignite.engine import Engine
 from torch_geometric.data import Batch
 from torch_geometric.utils import scatter_
+from torch_scatter import scatter_add
 from torchvision.ops import box_iou
 
 from xib.structures import matched_boxlist_union
@@ -37,7 +38,7 @@ class VisualRelationRecallAt(object):
     @staticmethod
     def _predicate_detection(predictions: Batch, targets: Batch) -> torch.Tensor:
         """Computes matches based on "predicate detection" mode."""
-        # [E_t, 5]
+        # [num_relations_gt, (subject_idx, object_idx, subject_class, predicate_class, object_class)]
         gt_matrix = torch.stack(
             [
                 # subject_idx, object_idx
@@ -51,7 +52,7 @@ class VisualRelationRecallAt(object):
             dim=1,
         )
 
-        # [E_p, 5]
+        # [num_relations_pred, (subject_idx, object_idx, subject_class, predicate_class, object_class)]
         pred_matrix = torch.stack(
             [
                 # subject_idx, object_idx
@@ -65,7 +66,7 @@ class VisualRelationRecallAt(object):
             dim=1,
         )
 
-        # Block matrix [E_p, E_t]
+        # Block matrix [num_relations_pred, num_relations_gt]
         matches = (gt_matrix[None, :, :] == pred_matrix[:, None, :]).all(dim=2)
 
         return matches
@@ -172,6 +173,8 @@ class VisualRelationRecallAt(object):
     def _recall_at(
         self, predictions: Batch, targets: Batch, matches: torch.Tensor
     ) -> Dict[int, float]:
+        # matches.shape = [num_relations_pred, num_relations_gt]
+
         # matches.argmax(dim=0) will return the last index if no True value is found.
         # We can use matches.any(dim=0) to ignore those cases.
         # Also, we must account for the row offset in the matches matrix.
@@ -202,3 +205,50 @@ class VisualRelationRecallAt(object):
         recall_at = recall_at_per_graph.mean(dim=1)
 
         return {k: v for k, v in zip(self.steps.numpy(), recall_at.numpy())}
+
+
+class VrdZeroShotVisualRelationRecallAt(VisualRelationRecallAt):
+    def __init__(self, type: Union[str], steps: Tuple[int, ...]):
+        super().__init__(type, steps)
+        from xib.datasets.vrd.catalog import get_zero_shot_triplets
+
+        self.zero_shot_triplets = get_zero_shot_triplets()
+
+    def __call__(self, engine: Engine):
+        targets = engine.state.batch[1]
+        targets = self.keep_zero_shot_targets(targets)
+
+        predictions = engine.state.output["relations"]
+        matches = self._compute_matches(predictions, targets)
+        recall_at = self._recall_at(predictions, targets, matches)
+
+        for k, r in recall_at.items():
+            r = torch.full((predictions.num_graphs, 1), fill_value=r)
+            engine.state.output[f"vr/{self.matching_type}/zero_shot/recall_at_{k}"] = r
+
+    def keep_zero_shot_targets(self, targets):
+        targets = targets.clone()
+        num_graphs = targets.num_graphs
+
+        keep = torch.tensor(
+            [
+                spo in self.zero_shot_triplets
+                for spo in zip(
+                    targets.object_classes[targets.relation_indexes[0]].numpy(),
+                    targets.predicate_classes.numpy(),
+                    targets.object_classes[targets.relation_indexes[1]].numpy(),
+                )
+            ]
+        )
+
+        edge_to_graph_assignment = targets.batch[targets.relation_indexes[0]]
+        targets.n_edges = scatter_add(
+            keep.long(),
+            index=edge_to_graph_assignment,
+            dim_size=num_graphs,
+            fill_value=0,
+        )
+        targets.relation_indexes = targets.relation_indexes[:, keep]
+        targets.predicate_classes = targets.predicate_classes[keep]
+
+        return targets

@@ -5,7 +5,7 @@ visual_relations:
   channel_mean: no
   relevance_fn: l1 # l1 l2 sum_positives
   object_scores: yes
-  frequencies: s,o|p # uniform 's,o|p' 's,p,o'
+  frequencies: s,o|p # 'uniform' 's,o|p' 's,o|p test' 's,p,o'
 
 hparams:
   vr/topk--topk: ${visual_relations.top_k_predicates}

@@ -66,6 +66,8 @@ class VisualRelationExplainer(torch.nn.Module):
             self.frequencies = None
         elif frequencies == "s,o|p":
             self.frequencies = pd.read_pickle(metadata.prob_s_o_given_p)
+        elif frequencies == "s,o|p test":
+            self.frequencies = pd.read_pickle(metadata.prob_s_o_given_p_test)
         elif frequencies == "s,p,o":
             self.frequencies = pd.read_pickle(metadata.prob_s_p_o)
         else:
