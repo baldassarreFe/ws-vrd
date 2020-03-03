@@ -250,7 +250,7 @@ class OutputGlobalModel(nn.Module):
         if not isinstance(mode, OutputGlobalModel.ReadoutMode):
             raise ValueError(f"Invalid readout mode: {mode}")
 
-        if pooling not in {"max", "mean"}:
+        if pooling not in {"max", "mean", "add"}:
             raise ValueError(f"Invalid pooling mode: {pooling}")
 
         self.mode = mode
